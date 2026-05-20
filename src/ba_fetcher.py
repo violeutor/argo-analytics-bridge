@@ -40,7 +40,7 @@ def fetch_and_store(company_name: str, db: Session) -> list[BAReport]:
     Returns: Liste der gespeicherten/vorhandenen BAReport-Objekte.
     """
     try:
-        import bundesAPI.bundesanzeiger as ba_module  # type: ignore
+        import deutschland.bundesanzeiger as ba_module  # type: ignore
     except ImportError:
         logger.error("bundesAPI nicht installiert — pip install bundesAPI")
         return []
