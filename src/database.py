@@ -31,5 +31,7 @@ def get_db():
 
 def init_db() -> None:
     """Legt alle Tabellen an wenn nicht vorhanden. Beim App-Start aufrufen."""
-    from src import models  # noqa: F401 — importiert damit SQLAlchemy die Tabellen kennt
+    from src import models  # noqa: F401 — BA-Tabellen: ba_reports, ba_financials, ba_persons
+    # YH-Tabellen: beta_cache, damodaran_beta
+    # werden über dasselbe models-Modul registriert (BetaCache, DamodaranBeta)
     Base.metadata.create_all(bind=engine)
