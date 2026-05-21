@@ -22,6 +22,10 @@ from src.models import BAReport, BAFinancial, BAPerson
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# In-Flight-Set — verhindert parallele Fetches für denselben Namen
+# Kein CAPTCHA-Risiko durch Concurrency
+_fetching: set[str] = set()
+
 
 def _check_api_key(x_api_key: str = Header(default="")) -> None:
     """API-Key Guard — nur wenn bridge_api_key konfiguriert."""
@@ -85,7 +89,14 @@ def _build_response(company_name: str, db: Session) -> dict | None:
 
 
 def _fetch_and_parse_bg(company_name: str) -> None:
-    """Background Task: Fetch + Parse für company_name."""
+    """Background Task: Fetch + Parse für company_name.
+    In-Flight-Guard verhindert parallele Fetches für denselben Namen.
+    """
+    if company_name in _fetching:
+        logger.info("Fetch für '%s' bereits in Progress — ignoriert", company_name)
+        return
+
+    _fetching.add(company_name)
     from src.database import SessionLocal
     from src.ba_fetcher import fetch_and_store
     from src.ba_parser import parse_pending
@@ -97,6 +108,7 @@ def _fetch_and_parse_bg(company_name: str) -> None:
     except Exception as e:
         logger.error("BG fetch+parse failed für '%s': %s", company_name, e)
     finally:
+        _fetching.discard(company_name)
         db.close()
 
 
