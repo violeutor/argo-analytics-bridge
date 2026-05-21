@@ -20,6 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.config import settings
 from src.database import init_db, SessionLocal
 from src.routes.company import router as company_router
+from src.routes.yahoo import router as yahoo_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -32,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 def _cron_enrich_all() -> None:
     """
-    Täglicher Cron: alle Companies in ba_reports refreshen + pending parsen.
+    Täglicher Cron 03:00 UTC: alle Companies in ba_reports refreshen + pending parsen.
     Holt distinct company_names aus ba_reports → re-fetch → parse_pending.
     """
     from src.ba_fetcher import fetch_and_store, get_pending_reports
@@ -64,6 +65,22 @@ def _cron_enrich_all() -> None:
         db.close()
 
 
+def _cron_beta_update() -> None:
+    """
+    Täglicher Cron 22:00 UTC: Beta-Kennzahlen für alle is_listed Ticker
+    aus Argo-Supabase neu berechnen + in beta_cache schreiben.
+    Läuft nach US-Börsenschluss (~21:00 UTC) für frische Tagesdaten.
+    """
+    from src.price_fetcher import run as run_price_fetcher
+
+    try:
+        logger.info("Cron _cron_beta_update: Start")
+        run_price_fetcher()
+        logger.info("Cron _cron_beta_update: Fertig")
+    except Exception as e:
+        logger.error("Cron _cron_beta_update failed: %s", e)
+
+
 # ── App Lifecycle ─────────────────────────────────────────────────────────────
 
 scheduler = BackgroundScheduler()
@@ -84,9 +101,17 @@ async def lifespan(app: FastAPI):
         id="daily_enrich",
         replace_existing=True,
     )
+    scheduler.add_job(
+        _cron_beta_update,
+        trigger="cron",
+        hour=22,
+        minute=0,
+        id="daily_beta_update",
+        replace_existing=True,
+    )
     scheduler.start()
     logger.info(
-        "Cron gestartet: täglich %02d:%02d UTC",
+        "Crons gestartet: BA-Enrich täglich %02d:%02d UTC · Beta-Update täglich 22:00 UTC",
         settings.cron_hour, settings.cron_minute,
     )
 
@@ -114,6 +139,7 @@ app.add_middleware(
 )
 
 app.include_router(company_router)
+app.include_router(yahoo_router)
 
 
 @app.get("/health")
