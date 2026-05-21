@@ -32,9 +32,28 @@ def _rate_limit() -> None:
     _last_request_ts = time.monotonic()
 
 
+# Fallback-Suffixe für Bundesanzeiger-Namenssuche
+_LEGAL_SUFFIXES = ["AG", "GmbH", "GmbH & Co. KG", "GmbH & Co. KGaA", "SE", "KGaA"]
+
+
+def _candidate_names(company_name: str) -> list[str]:
+    """
+    Gibt Suchkandidaten zurück: zuerst den Originalnamen, dann mit
+    gängigen Rechtssuffixen — falls der Kurzname nicht im Bundesanzeiger steht.
+    Bereits enthaltene Suffixe werden nicht doppelt angehängt.
+    """
+    candidates = [company_name]
+    name_upper = company_name.upper()
+    for suffix in _LEGAL_SUFFIXES:
+        if suffix.upper() not in name_upper:
+            candidates.append(f"{company_name} {suffix}")
+    return candidates
+
+
 def fetch_and_store(company_name: str, db: Session) -> list[BAReport]:
     """
     Holt alle verfügbaren Bundesanzeiger-Berichte für company_name.
+    Versucht bei 0 Treffern automatisch Fallback-Namen (AG, GmbH, etc.).
     Speichert neue Berichte in ba_reports (Duplikate werden übersprungen).
 
     Returns: Liste der gespeicherten/vorhandenen BAReport-Objekte.
@@ -45,17 +64,25 @@ def fetch_and_store(company_name: str, db: Session) -> list[BAReport]:
         logger.error("bundesAPI nicht installiert — pip install bundesAPI")
         return []
 
-    _rate_limit()
+    ba = ba_module.Bundesanzeiger()
+    reports_raw = None
+    matched_name = company_name
 
-    try:
-        ba = ba_module.Bundesanzeiger()
-        reports_raw = ba.get_reports(company_name)
-    except Exception as e:
-        logger.warning("bundesAPI fetch failed für '%s': %s", company_name, e)
-        return []
+    for candidate in _candidate_names(company_name):
+        _rate_limit()
+        try:
+            result = ba.get_reports(candidate)
+            if result:
+                reports_raw = result
+                matched_name = candidate
+                if candidate != company_name:
+                    logger.info("Namens-Fallback für '%s' -> '%s'", company_name, candidate)
+                break
+        except Exception as e:
+            logger.warning("bundesanzeiger fetch failed für '%s': %s", candidate, e)
 
     if not reports_raw:
-        logger.info("Keine Berichte gefunden für '%s'", company_name)
+        logger.info("Keine Berichte gefunden für '%s' (inkl. Fallbacks)", company_name)
         return []
 
     stored: list[BAReport] = []
@@ -78,7 +105,7 @@ def fetch_and_store(company_name: str, db: Session) -> list[BAReport]:
 
         # Duplikat-Check via UniqueConstraint
         existing = db.query(BAReport).filter_by(
-            company_name=company_name,
+            company_name=matched_name,
             document_date=doc_date,
             document_type=doc_type,
         ).first()
@@ -88,7 +115,7 @@ def fetch_and_store(company_name: str, db: Session) -> list[BAReport]:
             continue
 
         report = BAReport(
-            company_name=company_name,
+            company_name=matched_name,
             document_date=doc_date,
             document_type=doc_type,
             raw_text=raw_text,
@@ -100,7 +127,7 @@ def fetch_and_store(company_name: str, db: Session) -> list[BAReport]:
 
     try:
         db.commit()
-        logger.info("fetch_and_store '%s': %d Berichte gespeichert/gefunden", company_name, len(stored))
+        logger.info("fetch_and_store '%s' (matched: '%s'): %d Berichte gespeichert/gefunden", company_name, matched_name, len(stored))
     except Exception as e:
         db.rollback()
         logger.error("fetch_and_store DB commit failed für '%s': %s", company_name, e)
