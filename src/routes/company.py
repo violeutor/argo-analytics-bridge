@@ -92,11 +92,7 @@ def _fetch_and_parse_bg(company_name: str) -> None:
     """Background Task: Fetch + Parse für company_name.
     In-Flight-Guard verhindert parallele Fetches für denselben Namen.
     """
-    if company_name in _fetching:
-        logger.info("Fetch für '%s' bereits in Progress — ignoriert", company_name)
-        return
-
-    _fetching.add(company_name)
+    # Guard bereits im Route-Handler gesetzt — hier nur noch ausführen
     from src.database import SessionLocal
     from src.ba_fetcher import fetch_and_store
     from src.ba_parser import parse_pending
@@ -263,6 +259,18 @@ def get_company(
         }
 
     # 3. Noch nicht im Cache → Background Fetch triggern
+    # Guard synchron im Route-Handler setzen — verhindert Race Condition
+    # wenn zwei Requests gleichzeitig ankommen bevor BG-Task startet
+    if company_name in _fetching:
+        logger.info("BG fetch bereits in Progress für '%s' — 202 ohne neuen Task", company_name)
+        return {
+            "company_name": company_name,
+            "status":       "fetching",
+            "message":      "Daten werden bereits abgerufen. Bitte in 30–60 Sekunden erneut anfragen.",
+            "cached":       False,
+        }, 202
+
+    _fetching.add(company_name)
     background_tasks.add_task(_fetch_and_parse_bg, company_name)
     logger.info("BG fetch getriggert für '%s'", company_name)
 
