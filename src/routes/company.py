@@ -56,6 +56,28 @@ def _build_response(company_name: str, db: Session) -> dict | None:
     if not fin and not persons:
         return None
 
+    # BA-09: extraction_confidence on-the-fly aus BAFinancial ableiten
+    # Kein DB-Feld nötig — direkt aus vorhandenen Werten berechnen
+    if fin:
+        guv_count = sum(1 for f in (
+            fin.revenue_eur_mn, fin.ebitda_eur_mn,
+            fin.ebit_eur_mn, fin.net_income_eur_mn,
+        ) if f is not None)
+        balance_count = sum(1 for f in (
+            fin.equity_eur_mn, fin.total_assets_eur_mn,
+        ) if f is not None)
+
+        if guv_count >= 3:
+            extraction_confidence = "full"
+        elif guv_count >= 1:
+            extraction_confidence = "partial"
+        elif balance_count >= 1:
+            extraction_confidence = "balance_only"
+        else:
+            extraction_confidence = "not_found"
+    else:
+        extraction_confidence = "not_found"
+
     shareholders = [
         {
             "name":       p.name,
@@ -71,6 +93,7 @@ def _build_response(company_name: str, db: Session) -> dict | None:
 
     return {
         "company_name": company_name,
+        "extraction_confidence": extraction_confidence,   # BA-09
         "financials": {
             "fiscal_year":          fin.fiscal_year         if fin else None,
             "revenue_eur_mn":       fin.revenue_eur_mn      if fin else None,
@@ -250,12 +273,13 @@ def get_company(
     if existing and existing.parse_status == "done":
         # Reports da aber keine Finanzdaten extrahierbar (z.B. nur Lagebericht)
         return {
-            "company_name": company_name,
-            "financials":   None,
-            "shareholders": [],
-            "executives":   [],
-            "cached":       True,
-            "note":         "Keine strukturierten Finanzdaten im Bundesanzeiger verfügbar.",
+            "company_name":          company_name,
+            "extraction_confidence": getattr(existing, "extraction_confidence", None) or "not_found",
+            "financials":            None,
+            "shareholders":          [],
+            "executives":            [],
+            "cached":                True,
+            "note":                  "Keine strukturierten Finanzdaten im Bundesanzeiger verfügbar.",
         }
 
     # 3. Noch nicht im Cache → Background Fetch triggern

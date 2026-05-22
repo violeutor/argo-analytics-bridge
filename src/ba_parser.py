@@ -111,7 +111,7 @@ def parse_report(report: BAReport, db: Session) -> bool:
         company_name=report.company_name,
         doc_type=report.document_type or "Jahresabschluss",
         doc_date=report.document_date or "unbekannt",
-        text=report.raw_text[:6000],  # Token-Limit
+        text=report.raw_text[:6000],
     )
 
     result = _call_claude(prompt)
@@ -191,9 +191,25 @@ def parse_report(report: BAReport, db: Session) -> bool:
             db.rollback()
             logger.debug("BAPerson Exec Duplikat: %s / %s", report.company_name, name)
 
+    # BA-09: extraction_confidence für Logging ableiten (kein DB-Feld)
+    guv_count = sum(1 for f in (
+        result.get("revenue_eur_mn"), result.get("ebitda_eur_mn"),
+        result.get("ebit_eur_mn"), result.get("net_income_eur_mn"),
+    ) if f is not None)
+    balance_count = sum(1 for f in (
+        result.get("equity_eur_mn"), result.get("total_assets_eur_mn"),
+    ) if f is not None)
+    if guv_count >= 3:       log_confidence = "full"
+    elif guv_count >= 1:     log_confidence = "partial"
+    elif balance_count >= 1: log_confidence = "balance_only"
+    else:                    log_confidence = "not_found"
+
     report.parse_status = "done"
     db.commit()
-    logger.info("parse_report OK: %s — FY%s", report.company_name, fiscal_year)
+    logger.info(
+        "parse_report OK: %s — FY%s — extraction_confidence=%s",
+        report.company_name, fiscal_year, log_confidence,
+    )
     return True
 
 
