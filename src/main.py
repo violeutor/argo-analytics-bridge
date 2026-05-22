@@ -59,6 +59,16 @@ def _cron_enrich_all() -> None:
         parsed = parse_pending(db, limit=100)
         logger.info("Cron abgeschlossen: %d Reports geparst", parsed)
 
+        # KPI-Zeitreihen in Argo Supabase schreiben
+        from src.routes.company import _push_kpi_to_argo
+        total_pushed = 0
+        for name in names:
+            try:
+                total_pushed += _push_kpi_to_argo(name, db)
+            except Exception as e:
+                logger.warning("KPI-Push failed für '%s': %s", name, e)
+        logger.info("Cron KPI-Push: %d Rows total in Argo Supabase geschrieben", total_pushed)
+
     except Exception as e:
         logger.error("Cron _cron_enrich_all failed: %s", e)
     finally:

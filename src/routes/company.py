@@ -112,6 +112,119 @@ def _fetch_and_parse_bg(company_name: str) -> None:
         db.close()
 
 
+def _push_kpi_to_argo(company_name: str, db: Session) -> int:
+    """
+    Schreibt alle ba_financials Zeitreihen-Rows für company_name
+    in Argo Supabase kpi_timeseries.
+    Wird vom Cron nach parse_pending aufgerufen.
+    Returns: Anzahl geschriebener Rows.
+    """
+    if not settings.argo_backend_url or not settings.argo_api_key:
+        logger.debug("_push_kpi_to_argo: argo_backend_url/api_key nicht konfiguriert — übersprungen")
+        return 0
+
+    fins = (
+        db.query(BAFinancial)
+        .filter_by(company_name=company_name)
+        .order_by(BAFinancial.fiscal_year.asc())
+        .all()
+    )
+    if not fins:
+        return 0
+
+    # Metriken die wir pushen — metric_name → BAFinancial-Attribut
+    METRIC_MAP = {
+        "revenue_eur_mn":       "revenue_eur_mn",
+        "ebitda_eur_mn":        "ebitda_eur_mn",
+        "ebit_eur_mn":          "ebit_eur_mn",
+        "net_income_eur_mn":    "net_income_eur_mn",
+        "equity_eur_mn":        "equity_eur_mn",
+        "total_assets_eur_mn":  "total_assets_eur_mn",
+        "headcount":            "headcount",
+    }
+
+    rows = []
+    for fin in fins:
+        if not fin.fiscal_year:
+            continue
+        for metric, attr in METRIC_MAP.items():
+            val = getattr(fin, attr, None)
+            if val is None:
+                continue
+            rows.append({
+                "metric":      metric,
+                "fiscal_year": fin.fiscal_year,
+                "value":       float(val),
+                "currency":    "EUR" if "eur" in metric else None,
+                "source":      "ba_bridge",
+                "confidence":  fin.confidence or "medium",
+            })
+
+    if not rows:
+        return 0
+
+    try:
+        import httpx
+        with httpx.Client(timeout=15) as client:
+            resp = client.post(
+                f"{settings.argo_backend_url}/api/v1/company/{company_name}/kpi-timeseries",
+                headers={"X-API-Key": settings.argo_api_key},
+                json={"rows": rows},
+            )
+        if resp.status_code == 200:
+            written = resp.json().get("written", 0)
+            logger.info("_push_kpi_to_argo '%s': %d Rows geschrieben", company_name, written)
+            return written
+        else:
+            logger.warning("_push_kpi_to_argo '%s': HTTP %s", company_name, resp.status_code)
+    except Exception as e:
+        logger.warning("_push_kpi_to_argo failed für '%s': %s", company_name, e)
+
+    return 0
+
+
+@router.get("/ba/company/{company_name}/history")
+def get_company_history(
+    company_name: str,
+    db: Session = Depends(get_db),
+    _: None = Depends(_check_api_key),
+):
+    """
+    GET /ba/company/{company_name}/history
+    Gibt alle verfügbaren Jahresabschlüsse als Zeitreihe zurück.
+    Sortiert aufsteigend nach fiscal_year.
+    """
+    fins = (
+        db.query(BAFinancial)
+        .filter_by(company_name=company_name)
+        .order_by(BAFinancial.fiscal_year.asc())
+        .all()
+    )
+    if not fins:
+        return {"company_name": company_name, "history": [], "years": 0}
+
+    history = [
+        {
+            "fiscal_year":         fin.fiscal_year,
+            "revenue_eur_mn":      fin.revenue_eur_mn,
+            "ebitda_eur_mn":       fin.ebitda_eur_mn,
+            "ebit_eur_mn":         fin.ebit_eur_mn,
+            "net_income_eur_mn":   fin.net_income_eur_mn,
+            "equity_eur_mn":       fin.equity_eur_mn,
+            "total_assets_eur_mn": fin.total_assets_eur_mn,
+            "headcount":           fin.headcount,
+            "confidence":          fin.confidence,
+        }
+        for fin in fins
+    ]
+
+    return {
+        "company_name": company_name,
+        "history":      history,
+        "years":        len(history),
+    }
+
+
 @router.get("/ba/company/{company_name}")
 def get_company(
     company_name: str,
