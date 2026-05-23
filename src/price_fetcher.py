@@ -40,12 +40,33 @@ log = logging.getLogger(__name__)
 # Benchmark-Mapping (Exchange → Index-Ticker)
 # Quelle: yfinance — alle Indizes zuverlässig verfügbar.
 # ---------------------------------------------------------------------------
+# Exchange → yfinance Ticker-Suffix (non-US Börsen brauchen Suffix für yfinance)
+TICKER_SUFFIX_MAP: dict[str, str] = {
+    "xetra":              ".DE",
+    "frankfurt":          ".DE",
+    "fse":                ".F",
+    "euronext paris":     ".PA",
+    "euronext amsterdam": ".AS",
+    "euronext":           ".PA",
+    "london":             ".L",
+    "lse":                ".L",
+    "swiss":              ".SW",
+    "six":                ".SW",
+    "milan":              ".MI",
+    "bmv":                ".MX",
+    "tsx":                ".TO",
+    "asx":                ".AX",
+    "hkex":               ".HK",
+    "tokyo":              ".T",
+}
+
 BENCHMARK_MAP: dict[str, str] = {
     # USA
     "NYSE":       "^GSPC",       # S&P 500
     "Nasdaq":     "^GSPC",       # S&P 500
     # Deutschland
     "Frankfurt":  "^GDAXI",      # DAX 40
+    "Xetra":      "^GDAXI",      # DAX 40
     # UK
     "London":     "^FTSE",       # FTSE 100
     # Frankreich
@@ -104,8 +125,10 @@ def fetch_tickers_from_argo() -> list[dict]:
     for c in companies:
         if c.get("is_listed") and c.get("ticker"):
             result.append({
-                "ticker":   c["ticker"].strip().upper(),
-                "exchange": c.get("exchange") or "",
+                "ticker":    c["ticker"].strip().upper(),
+                "exchange":  c.get("exchange") or "",
+                "ticker_yf": c.get("ticker_yf") or "",   # vorberechneter yfinance-Ticker
+                "company_id": c.get("id") or "",
             })
 
     log.info(f"{len(result)} listed Ticker aus Argo geladen.")
@@ -138,26 +161,50 @@ def fetch_price_data(ticker: str, period: str = "3y"):
 # Haupt-Pipeline
 # ---------------------------------------------------------------------------
 
-def process_ticker(ticker: str, exchange: str, session) -> bool:
+def process_ticker(ticker: str, exchange: str, session,
+                   ticker_yf: str = "", company_id: str = "") -> bool:
     """
     Verarbeitet einen einzelnen Ticker:
-    1. Benchmark bestimmen
-    2. Stock + Benchmark Kursdaten holen
-    3. Beta + Volatilität berechnen (via beta_calculator)
-    4. beta_cache upsert
+    1. yfinance-Ticker bestimmen (ticker_yf aus DB oder Suffix-Logik)
+    2. Benchmark bestimmen
+    3. Stock + Benchmark Kursdaten holen
+    4. Beta + Volatilität berechnen (via beta_calculator)
+    5. beta_cache upsert
+    6. ticker_yf in Argo-DB zurückschreiben (companies.ticker_yf)
 
     Gibt True zurück bei Erfolg.
     """
     benchmark_ticker, is_fallback = resolve_benchmark(exchange)
 
+    # yfinance-Ticker: ticker_yf aus DB bevorzugen, sonst Suffix-Logik
+    if ticker_yf and "." in ticker_yf:
+        yf_ticker = ticker_yf
+    else:
+        exchange_norm = exchange.lower() if exchange else ""
+        suffix = TICKER_SUFFIX_MAP.get(exchange_norm, "")
+        yf_ticker = ticker if ("." in ticker or not suffix) else ticker + suffix
+        # Neu berechneten yf_ticker in Argo-DB zurückschreiben (companies.ticker_yf)
+        if yf_ticker != ticker and company_id:
+            try:
+                import httpx as _httpx
+                _httpx.patch(
+                    f"{settings.argo_backend_url}/api/v1/companies/{company_id}/ticker-yf",
+                    json={"ticker_yf": yf_ticker},
+                    headers={"X-API-Key": settings.argo_api_key},
+                    timeout=5,
+                )
+                log.info(f"[{ticker}] ticker_yf={yf_ticker} → Argo OK")
+            except Exception as _e:
+                log.warning(f"[{ticker}] ticker_yf Rückschreiben fehlgeschlagen: {_e}")
+
     log.info(
-        f"[{ticker}] Exchange={exchange or '?'} → "
+        f"[{ticker}] yf_ticker={yf_ticker} Exchange={exchange or '?'} → "
         f"Benchmark={benchmark_ticker}"
         f"{' (fallback)' if is_fallback else ''}"
     )
 
     # Kursdaten holen
-    stock_data = fetch_price_data(ticker, period="3y")
+    stock_data = fetch_price_data(yf_ticker, period="3y")
     if stock_data is None:
         return False
 
@@ -268,6 +315,8 @@ def run(tickers_override: list[str] | None = None) -> None:
                 ticker=entry["ticker"],
                 exchange=entry["exchange"],
                 session=session,
+                ticker_yf=entry.get("ticker_yf", ""),
+                company_id=entry.get("company_id", ""),
             )
             if ok:
                 success += 1
