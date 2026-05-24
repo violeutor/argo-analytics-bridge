@@ -123,11 +123,15 @@ def fetch_tickers_from_argo() -> list[dict]:
 
     result = []
     for c in companies:
-        if c.get("is_listed") and c.get("ticker"):
+        # BUG-42: Feld heißt ipo_status, nicht is_listed — is_listed ist nur ein berechnetes Feld
+        is_listed = c.get("ipo_status") == "listed"
+        ticker_yf = (c.get("ticker_yf") or "").strip()
+        ticker    = (c.get("ticker") or "").strip().upper()
+        if is_listed and ticker:
             result.append({
-                "ticker":    c["ticker"].strip().upper(),
-                "exchange":  c.get("exchange") or "",
-                "ticker_yf": c.get("ticker_yf") or "",   # vorberechneter yfinance-Ticker
+                "ticker":     ticker,
+                "exchange":   c.get("exchange") or "",
+                "ticker_yf":  ticker_yf,   # aus DB — von Argo-Cron vorberechnet
                 "company_id": c.get("id") or "",
             })
 
@@ -176,26 +180,15 @@ def process_ticker(ticker: str, exchange: str, session,
     """
     benchmark_ticker, is_fallback = resolve_benchmark(exchange)
 
-    # yfinance-Ticker: ticker_yf aus DB bevorzugen, sonst Suffix-Logik
-    if ticker_yf and "." in ticker_yf:
+    # yfinance-Ticker: ticker_yf aus DB bevorzugen (von Argo-Cron vorberechnet)
+    # Bridge schreibt ticker_yf nicht mehr zurück — das macht Argo-Backend-Cron (BUG-42)
+    if ticker_yf and ticker_yf != ticker:
         yf_ticker = ticker_yf
     else:
+        # Fallback: Suffix-Logik lokal (für den Fall dass Argo-Cron noch nicht gelaufen)
         exchange_norm = exchange.lower() if exchange else ""
         suffix = TICKER_SUFFIX_MAP.get(exchange_norm, "")
-        yf_ticker = ticker if ("." in ticker or not suffix) else ticker + suffix
-        # Neu berechneten yf_ticker in Argo-DB zurückschreiben (companies.ticker_yf)
-        if yf_ticker != ticker and company_id:
-            try:
-                import httpx as _httpx
-                _httpx.patch(
-                    f"{settings.argo_backend_url}/api/v1/companies/{company_id}/ticker-yf",
-                    json={"ticker_yf": yf_ticker},
-                    headers={"X-API-Key": settings.argo_api_key},
-                    timeout=5,
-                )
-                log.info(f"[{ticker}] ticker_yf={yf_ticker} → Argo OK")
-            except Exception as _e:
-                log.warning(f"[{ticker}] ticker_yf Rückschreiben fehlgeschlagen: {_e}")
+        yf_ticker = ticker + suffix if suffix and "." not in ticker else ticker
 
     log.info(
         f"[{ticker}] yf_ticker={yf_ticker} Exchange={exchange or '?'} → "
