@@ -151,16 +151,19 @@ def _push_kpi_to_argo(company_name: str, db: Session) -> int:
     if not fins:
         return 0
 
-    # Metriken die wir pushen — metric_name → BAFinancial-Attribut
+    # Metriken die wir pushen — neutraler metric_name → BAFinancial-Attribut
+    # Naming-Konvention: metric-Key ist währungsneutral (_mn statt _eur_mn).
+    # Währung steht im currency-Feld — EDGAR schreibt später USD, gleiche Keys.
     METRIC_MAP = {
-        "revenue_eur_mn":       "revenue_eur_mn",
-        "ebitda_eur_mn":        "ebitda_eur_mn",
-        "ebit_eur_mn":          "ebit_eur_mn",
-        "net_income_eur_mn":    "net_income_eur_mn",
-        "equity_eur_mn":        "equity_eur_mn",
-        "total_assets_eur_mn":  "total_assets_eur_mn",
-        "headcount":            "headcount",
+        "revenue_mn":       "revenue_eur_mn",
+        "ebitda_mn":        "ebitda_eur_mn",
+        "ebit_mn":          "ebit_eur_mn",
+        "net_income_mn":    "net_income_eur_mn",
+        "equity_mn":        "equity_eur_mn",
+        "total_assets_mn":  "total_assets_eur_mn",
+        "headcount":        "headcount",
     }
+    _MONETARY = {"revenue_mn", "ebitda_mn", "ebit_mn", "net_income_mn", "equity_mn", "total_assets_mn"}
 
     rows = []
     for fin in fins:
@@ -174,7 +177,7 @@ def _push_kpi_to_argo(company_name: str, db: Session) -> int:
                 "metric":      metric,
                 "fiscal_year": fin.fiscal_year,
                 "value":       float(val),
-                "currency":    "EUR" if "eur" in metric else None,
+                "currency":    "EUR" if metric in _MONETARY else None,
                 "source":      "ba_bridge",
                 "confidence":  fin.confidence or "medium",
             })
