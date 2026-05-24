@@ -225,6 +225,87 @@ def get_fundamentals(ticker: str):
         )
     except Exception as e:
         log.warning("[GET /yahoo/fundamentals/%s] yfinance error: %s", ticker, e)
-        # Kein Hard-Fail — leeres dict zurück, Backend fällt auf Defaults zurück
 
     return out
+
+
+# ---------------------------------------------------------------------------
+# GET /yahoo/ownership/{ticker}
+# EN-08 · Institutional Holders via yfinance — Fallback für listed Companies
+# Wird vom Argo Backend aufgerufen wenn BaFin/EDGAR keinen Treffer liefern.
+# ---------------------------------------------------------------------------
+
+@router.get("/ownership/{ticker}")
+def get_ownership(ticker: str):
+    """
+    EN-08: Gibt institutionelle Anteilseigner für einen Ticker via yfinance zurück.
+    Fallback-Quelle für listed Companies (nach BaFin DE + EDGAR SC 13G/13D).
+
+    Response-Felder:
+        ticker          — normalisierter Ticker
+        holders         — Liste mit name, share_pct, shares, value_usd, date_reported, type
+        source          — "yfinance_institutional_holders"
+        holder_count    — Anzahl Einträge
+
+    HTTP-Status:
+        200 — immer (leere holders-Liste wenn keine Daten verfügbar)
+        422 — Ticker leer
+    """
+    ticker = ticker.strip().upper()
+    if not ticker:
+        raise HTTPException(status_code=422, detail="Ticker darf nicht leer sein.")
+
+    holders: list[dict] = []
+    try:
+        yf_ticker   = yf.Ticker(ticker)
+        inst        = yf_ticker.institutional_holders   # DataFrame oder None
+
+        if inst is not None and not inst.empty:
+            for _, row in inst.iterrows():
+                name = str(row.get("Holder") or "").strip()
+                if not name:
+                    continue
+                pct_raw = row.get("% Out")
+                try:
+                    share_pct = round(float(pct_raw) * 100, 2) if pct_raw is not None else None
+                except (ValueError, TypeError):
+                    share_pct = None
+
+                shares_raw = row.get("Shares")
+                try:
+                    shares = int(shares_raw) if shares_raw is not None else None
+                except (ValueError, TypeError):
+                    shares = None
+
+                value_raw = row.get("Value")
+                try:
+                    value_usd = int(value_raw) if value_raw is not None else None
+                except (ValueError, TypeError):
+                    value_usd = None
+
+                date_raw = row.get("Date Reported")
+                date_str = str(date_raw)[:10] if date_raw is not None else None
+
+                holders.append({
+                    "name":          name,
+                    "share_pct":     share_pct,
+                    "shares":        shares,
+                    "value_usd":     value_usd,
+                    "date_reported": date_str,
+                    "type":          "institutional",
+                    "role":          "shareholder",
+                })
+
+        log.info(
+            "[GET /yahoo/ownership/%s] OK — %d institutional holders",
+            ticker, len(holders),
+        )
+    except Exception as e:
+        log.warning("[GET /yahoo/ownership/%s] yfinance error: %s", ticker, e)
+
+    return {
+        "ticker":       ticker,
+        "holders":      holders,
+        "holder_count": len(holders),
+        "source":       "yfinance_institutional_holders",
+    }

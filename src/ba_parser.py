@@ -73,7 +73,7 @@ def _call_claude(prompt: str) -> dict | None:
                 _CLAUDE_URL,
                 headers=_HEADERS,
                 json={
-                    "model": "claude-sonnet-4-6",
+                    "model": "claude-haiku-4-5-20251001",   # COST-01: Haiku für NER-Extraktion
                     "max_tokens": 1000,
                     "messages": [{"role": "user", "content": prompt}],
                 },
