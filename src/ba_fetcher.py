@@ -117,7 +117,7 @@ def _fetch_with_backoff(ba, candidate: str) -> tuple[list | None, bool]:
     return None, False  # sollte nicht erreicht werden
 
 
-
+def fetch_and_store(company_name: str, db: Session) -> list[BAReport]:
     """
     Holt alle verfügbaren Bundesanzeiger-Berichte für company_name.
     Versucht bei 0 Treffern automatisch Fallback-Namen (AG, GmbH, etc.).
