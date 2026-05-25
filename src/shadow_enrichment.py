@@ -54,59 +54,76 @@ _DISAMBIG_RE = re.compile(
 def _fetch_wikipedia_de_companies(limit: int = 500) -> list[str]:
     """
     Holt Artikel-Titel aus Wikipedia DE Kategorie 'Unternehmen_(Deutschland)'.
-    Paginiert automatisch. Bereinigt Klammerzusätze aus Titeln.
-    Gibt bereinigte, eindeutige Company-Namen zurück.
+
+    Zweistufig — weil die Hauptkategorie nur wenige direkte Artikel hat:
+      Stufe 1: Subkategorien der Hauptkategorie holen (bis 100 Subkats)
+      Stufe 2: Pro Subkategorie direkte Artikel holen (bis 50 Artikel/Subkat)
+    Direkte Artikel der Hauptkategorie werden ebenfalls eingeschlossen.
+    Bereinigt Klammerzusätze aus Titeln. Gibt bereinigte, eindeutige Namen zurück.
     """
-    names: list[str] = []
-    params: dict = {
-        "action":  "query",
-        "list":    "categorymembers",
-        "cmtitle": "Kategorie:Unternehmen_(Deutschland)",
-        "cmlimit": min(limit, 500),
-        "cmtype":  "page",
-        "format":  "json",
-    }
+    _ROOT_CAT = "Kategorie:Unternehmen_(Deutschland)"
 
-    try:
-        with httpx.Client(timeout=15, headers=_WIKI_HEADERS) as client:
-            while len(names) < limit:
-                resp = client.get(_WIKI_CATEGORY_URL, params=params)
-                if resp.status_code != 200:
-                    logger.warning(
-                        "_fetch_wikipedia_de_companies HTTP %s", resp.status_code
-                    )
-                    break
+    def _fetch_cat_members(cat_title: str, cmtype: str, max_items: int) -> list[str]:
+        """Holt Mitglieder (Seiten oder Subkats) einer Wikipedia-Kategorie."""
+        results: list[str] = []
+        params: dict = {
+            "action":  "query",
+            "list":    "categorymembers",
+            "cmtitle": cat_title,
+            "cmlimit": min(max_items, 500),
+            "cmtype":  cmtype,
+            "format":  "json",
+        }
+        try:
+            with httpx.Client(timeout=15, headers=_WIKI_HEADERS) as client:
+                while len(results) < max_items:
+                    resp = client.get(_WIKI_CATEGORY_URL, params=params)
+                    if resp.status_code != 200:
+                        break
+                    data    = resp.json()
+                    members = data.get("query", {}).get("categorymembers", [])
+                    results.extend(m.get("title", "") for m in members if m.get("title"))
+                    if "continue" in data:
+                        params["cmcontinue"] = data["continue"]["cmcontinue"]
+                    else:
+                        break
+        except Exception as e:
+            logger.warning("_fetch_cat_members failed für '%s': %s", cat_title, e)
+        return results
 
-                data    = resp.json()
-                members = data.get("query", {}).get("categorymembers", [])
+    raw_titles: list[str] = []
 
-                for m in members:
-                    title = m.get("title", "").strip()
-                    if ":" in title:
-                        continue
-                    clean = _DISAMBIG_RE.sub("", title).strip()
-                    if clean:
-                        names.append(clean)
+    # Stufe 1: direkte Artikel der Hauptkategorie (normalerweise wenige)
+    raw_titles += _fetch_cat_members(_ROOT_CAT, "page", max_items=500)
 
-                if "continue" in data:
-                    params["cmcontinue"] = data["continue"]["cmcontinue"]
-                else:
-                    break
+    # Stufe 2: Subkategorien → deren direkte Artikel
+    subcats = _fetch_cat_members(_ROOT_CAT, "subcat", max_items=100)
+    logger.info(
+        "_fetch_wikipedia_de_companies: %d Subkategorien gefunden", len(subcats)
+    )
+    for subcat in subcats:
+        if len(raw_titles) >= limit * 3:   # Buffer — nach Bereinigung bleiben weniger
+            break
+        pages = _fetch_cat_members(subcat, "page", max_items=50)
+        raw_titles += pages
+        time.sleep(0.05)   # Wikipedia Rate-Limit
 
-    except Exception as e:
-        logger.warning("_fetch_wikipedia_de_companies failed: %s", e)
-
-    seen: set[str] = set()
+    # Bereinigen + deduplizieren
+    seen:   set[str]  = set()
     unique: list[str] = []
-    for n in names:
-        if n.lower() not in seen:
-            seen.add(n.lower())
-            unique.append(n)
+    for title in raw_titles:
+        if ":" in title:
+            continue   # Subkat-Reste überspringen
+        clean = _DISAMBIG_RE.sub("", title).strip()
+        if clean and clean.lower() not in seen:
+            seen.add(clean.lower())
+            unique.append(clean)
 
     logger.info(
-        "_fetch_wikipedia_de_companies: %d eindeutige Companies aus Wikipedia DE", len(unique)
+        "_fetch_wikipedia_de_companies: %d eindeutige Companies aus Wikipedia DE",
+        len(unique),
     )
-    return unique
+    return unique[:limit]
 
 
 # ── Supabase-Abruf (Ausschluss-Filter) ───────────────────────────────────────
