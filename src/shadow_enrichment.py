@@ -73,36 +73,55 @@ def _fetch_wikidata_de_gmbh_companies(limit: int = 500) -> list[str]:
         "User-Agent": "ArgoAnalytics/1.0 (info@argo-analytics.io)",
         "Accept":     "application/sparql-results+json",
     }
-    try:
-        with httpx.Client(timeout=60, headers=headers) as client:
-            resp = client.get(
-                _WIKIDATA_URL,
-                params={"query": _WIKIDATA_QUERY, "format": "json"},
+    params  = {"query": _WIKIDATA_QUERY, "format": "json"}
+    backoff = [65, 120, 300]   # 429: 65s → 120s → 300s
+
+    for attempt, wait in enumerate([0] + backoff):
+        if wait:
+            logger.info(
+                "_fetch_wikidata_de_gmbh_companies: 429 — warte %ds (Attempt %d/%d)",
+                wait, attempt, len(backoff) + 1,
             )
-        if resp.status_code != 200:
-            logger.warning(
-                "_fetch_wikidata_de_gmbh_companies HTTP %s", resp.status_code
+            time.sleep(wait)
+        try:
+            with httpx.Client(timeout=60, headers=headers) as client:
+                resp = client.get(_WIKIDATA_URL, params=params)
+
+            if resp.status_code == 429:
+                if attempt < len(backoff):
+                    continue   # nächster Backoff-Schritt
+                logger.warning(
+                    "_fetch_wikidata_de_gmbh_companies: 429 nach %d Versuchen — abgebrochen",
+                    len(backoff) + 1,
+                )
+                return []
+
+            if resp.status_code != 200:
+                logger.warning(
+                    "_fetch_wikidata_de_gmbh_companies HTTP %s", resp.status_code
+                )
+                return []
+
+            bindings = resp.json().get("results", {}).get("bindings", [])
+            seen:   set[str]  = set()
+            unique: list[str] = []
+            for b in bindings:
+                label = (b.get("companyLabel") or {}).get("value", "").strip()
+                if label and label.lower() not in seen:
+                    seen.add(label.lower())
+                    unique.append(label)
+
+            logger.info(
+                "_fetch_wikidata_de_gmbh_companies: %d eindeutige GmbH-Companies "
+                "aus Wikidata", len(unique),
             )
+            return unique[:limit]
+
+        except Exception as e:
+            logger.warning("_fetch_wikidata_de_gmbh_companies failed: %s", e)
             return []
 
-        bindings = resp.json().get("results", {}).get("bindings", [])
-        seen:   set[str]  = set()
-        unique: list[str] = []
-        for b in bindings:
-            label = (b.get("companyLabel") or {}).get("value", "").strip()
-            if label and label.lower() not in seen:
-                seen.add(label.lower())
-                unique.append(label)
-
-        logger.info(
-            "_fetch_wikidata_de_gmbh_companies: %d eindeutige GmbH-Companies "
-            "aus Wikidata", len(unique),
-        )
-        return unique[:limit]
-
-    except Exception as e:
-        logger.warning("_fetch_wikidata_de_gmbh_companies failed: %s", e)
-        return []
+    return []
 
 
 
