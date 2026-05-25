@@ -5,7 +5,9 @@ Holt Jahresabschluss-Volltexte aus dem Bundesanzeiger via bundesAPI (PyPI).
 Persistiert Rohtexte in ba_reports — kein Parsing hier, nur sammeln.
 
 Rate-Limit: 1 Request / ba_rate_limit_sec (default 3s) — CAPTCHA-Schutz.
-CAPTCHA-Fehler → Retry mit Backoff, Cache bleibt verfügbar.
+BA-11: CAPTCHA-Detection + Exponential Backoff (30s → 60s → 120s, Max 3×).
+       Bei persistentem CAPTCHA: Abbruch + Log 'captcha_blocked'.
+       Shadow Company bleibt 'pending' → automatischer Retry beim nächsten Cron-Run.
 """
 import logging
 import time
@@ -20,6 +22,16 @@ logger = logging.getLogger(__name__)
 
 # Letzter Request-Zeitstempel — globales Rate-Limit (prozess-weit)
 _last_request_ts: float = 0.0
+
+# BA-11: CAPTCHA-Erkennungs-Keywords in Exception-Messages + Response-Text
+_CAPTCHA_KEYWORDS = (
+    "captcha", "robot", "blocked", "access denied",
+    "too many requests", "429", "rate limit", "gesperrt",
+    "zugriff verweigert", "bitte bestätigen",
+)
+
+# BA-11: Exponential Backoff Delays (Sekunden) — 3 Versuche
+_BACKOFF_DELAYS = [30, 60, 120]
 
 
 def _rate_limit() -> None:
@@ -50,7 +62,62 @@ def _candidate_names(company_name: str) -> list[str]:
     return candidates
 
 
-def fetch_and_store(company_name: str, db: Session) -> list[BAReport]:
+def _is_captcha_signal(exc: Exception | None = None, text: str = "") -> bool:
+    """
+    BA-11: Erkennt CAPTCHA-Signal in Exception-Message oder Response-Text.
+    Prüft beide Quellen — bundesAPI kann CAPTCHA als Exception oder als
+    leeren/fehlerhaften Response zurückgeben.
+    """
+    combined = (str(exc) + " " + text).lower()
+    return any(kw in combined for kw in _CAPTCHA_KEYWORDS)
+
+
+def _fetch_with_backoff(ba, candidate: str) -> tuple[list | None, bool]:
+    """
+    BA-11: Fetcht Reports für einen Kandidaten mit exponentiellem Backoff.
+
+    Returns:
+      (result, captcha_blocked)
+        result=None          → Fehler oder kein Treffer
+        captcha_blocked=True → CAPTCHA nach max. Retries — Abbruch
+        captcha_blocked=False → normaler Fehler oder Treffer
+    """
+    max_retries = len(_BACKOFF_DELAYS)
+
+    for attempt in range(max_retries):
+        _rate_limit()
+        try:
+            result = ba.get_reports(candidate)
+            return result, False
+
+        except Exception as e:
+            if _is_captcha_signal(exc=e):
+                if attempt < max_retries - 1:
+                    wait = _BACKOFF_DELAYS[attempt]
+                    logger.warning(
+                        "BA-11 CAPTCHA detected für '%s' (Attempt %d/%d) — "
+                        "Backoff %ds",
+                        candidate, attempt + 1, max_retries, wait,
+                    )
+                    time.sleep(wait)
+                else:
+                    logger.error(
+                        "BA-11 CAPTCHA persistent für '%s' nach %d Versuchen — "
+                        "captcha_blocked, Shadow Company bleibt pending",
+                        candidate, max_retries,
+                    )
+                    return None, True
+            else:
+                # Normaler Fehler (Timeout, Netzwerk, BA down) — kein Retry
+                logger.warning(
+                    "bundesanzeiger fetch failed für '%s': %s", candidate, e
+                )
+                return None, False
+
+    return None, False  # sollte nicht erreicht werden
+
+
+
     """
     Holt alle verfügbaren Bundesanzeiger-Berichte für company_name.
     Versucht bei 0 Treffern automatisch Fallback-Namen (AG, GmbH, etc.).
@@ -67,19 +134,27 @@ def fetch_and_store(company_name: str, db: Session) -> list[BAReport]:
     ba = ba_module.Bundesanzeiger()
     reports_raw = None
     matched_name = company_name
+    captcha_blocked = False
 
     for candidate in _candidate_names(company_name):
-        _rate_limit()
-        try:
-            result = ba.get_reports(candidate)
-            if result:
-                reports_raw = result
-                matched_name = candidate
-                if candidate != company_name:
-                    logger.info("Namens-Fallback für '%s' -> '%s'", company_name, candidate)
-                break
-        except Exception as e:
-            logger.warning("bundesanzeiger fetch failed für '%s': %s", candidate, e)
+        result, captcha_blocked = _fetch_with_backoff(ba, candidate)
+        if captcha_blocked:
+            # CAPTCHA persistent — alle weiteren Kandidaten überspringen
+            break
+        if result:
+            reports_raw = result
+            matched_name = candidate
+            if candidate != company_name:
+                logger.info("Namens-Fallback für '%s' -> '%s'", company_name, candidate)
+            break
+
+    if captcha_blocked:
+        logger.error(
+            "fetch_and_store '%s': captcha_blocked — "
+            "Shadow Company bleibt pending, Retry beim nächsten Cron-Run (2.5h)",
+            company_name,
+        )
+        return []
 
     if not reports_raw:
         logger.info("Keine Berichte gefunden für '%s' (inkl. Fallbacks)", company_name)
@@ -141,9 +216,23 @@ def get_pending_reports(db: Session) -> list[BAReport]:
     return db.query(BAReport).filter_by(parse_status="pending").all()
 
 
-def mark_parsed(report_id: int, db: Session, status: str = "done") -> None:
-    """Setzt parse_status auf done | error."""
+def mark_parsed(
+    report_id: int,
+    db: Session,
+    status: str = "done",
+    extraction_confidence: str | None = None,
+) -> None:
+    """
+    Setzt parse_status auf done | error.
+    BA-09: extraction_confidence optional mitsetzen:
+      'full'         — GuV vollständig (Revenue + EBITDA/EBIT + Net Income)
+      'partial'      — Teilfelder fehlen (nur Bilanz oder nur ein GuV-Feld)
+      'balance_only' — Nur Bilanz vorhanden (§267 HGB kleine KapGes)
+      'not_found'    — Kein strukturiertes Zahlenmaterial extrahierbar
+    """
     report = db.query(BAReport).get(report_id)
     if report:
         report.parse_status = status
+        if extraction_confidence is not None:
+            report.extraction_confidence = extraction_confidence
         db.commit()
