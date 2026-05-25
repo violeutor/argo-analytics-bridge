@@ -185,9 +185,11 @@ async def lifespan(app: FastAPI):
         finally:
             db_check.close()
 
-        if queue_size == 0:
+        if queue_size < 10:
             logger.info(
-                "Shadow-Queue leer nach Startup — _cron_shadow_seed wird sofort gefeuert"
+                "Shadow-Queue zu klein nach Startup (%d Companies) — "
+                "_cron_shadow_seed wird sofort gefeuert",
+                queue_size,
             )
             scheduler.add_job(
                 _cron_shadow_seed,
@@ -226,7 +228,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],   # Intern only — kein Public Access
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
