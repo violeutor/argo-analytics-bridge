@@ -216,6 +216,17 @@ def get_pending_reports(db: Session) -> list[BAReport]:
     return db.query(BAReport).filter_by(parse_status="pending").all()
 
 
+def get_companies_with_financials(db: Session) -> list[str]:
+    """
+    KPI-04: Gibt alle company_names zurück die mindestens eine BAFinancial-Row haben.
+    Wird vom Cron (main.py) genutzt um nach parse_pending alle betroffenen
+    Companies an Argo kpi_timeseries zu pushen.
+    """
+    from src.models import BAFinancial
+    rows = db.query(BAFinancial.company_name).distinct().all()
+    return [r[0] for r in rows if r[0]]
+
+
 def mark_parsed(
     report_id: int,
     db: Session,

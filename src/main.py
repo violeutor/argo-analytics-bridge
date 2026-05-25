@@ -37,9 +37,13 @@ def _cron_enrich_all() -> None:
     """
     Täglicher Cron 03:00 UTC: alle Companies in ba_reports refreshen + pending parsen.
     Holt distinct company_names aus ba_reports → re-fetch → parse_pending.
+
+    KPI-04: parse_pending() gibt (count, companies) zurück — nur frisch geparste
+    Companies werden an Argo kpi_timeseries gepusht (nicht alle). Das spart
+    unnötige HTTP-Calls und verhindert Argo-Überlastung beim Cron.
     """
-    from src.ba_fetcher import fetch_and_store, get_pending_reports
-    from src.ba_parser import parse_pending
+    from src.ba_fetcher import fetch_and_store
+    from src.ba_parser import parse_pending, push_kpi_to_argo
 
     db = SessionLocal()
     try:
@@ -58,18 +62,25 @@ def _cron_enrich_all() -> None:
             except Exception as e:
                 logger.warning("Cron fetch failed für '%s': %s", name, e)
 
-        parsed = parse_pending(db, limit=100)
-        logger.info("Cron abgeschlossen: %d Reports geparst", parsed)
+        # KPI-04: parse_pending gibt (count, parsed_company_names) zurück
+        parsed_count, parsed_companies = parse_pending(db, limit=100)
+        logger.info(
+            "Cron parse_pending: %d Reports geparst, %d Companies neu",
+            parsed_count, len(parsed_companies),
+        )
 
-        # KPI-Zeitreihen in Argo Supabase schreiben
-        from src.routes.company import _push_kpi_to_argo
+        # KPI-Push nur für frisch geparste Companies — nicht für alle names
         total_pushed = 0
-        for name in names:
+        for name in parsed_companies:
             try:
-                total_pushed += _push_kpi_to_argo(name, db)
+                total_pushed += push_kpi_to_argo(name, db)
             except Exception as e:
                 logger.warning("KPI-Push failed für '%s': %s", name, e)
-        logger.info("Cron KPI-Push: %d Rows total in Argo Supabase geschrieben", total_pushed)
+        if parsed_companies:
+            logger.info(
+                "Cron KPI-Push: %d Rows für %d Companies in Argo Supabase geschrieben",
+                total_pushed, len(parsed_companies),
+            )
 
     except Exception as e:
         logger.error("Cron _cron_enrich_all failed: %s", e)

@@ -10,6 +10,9 @@ Wenn kein Cache vorhanden:
 
 Wenn Cache vorhanden:
   → 200 mit strukturierten Daten
+
+KPI-04: push_kpi_to_argo() in ba_parser.py — wird nach jedem Fetch+Parse
+aufgerufen (on-demand + Cron). Schreibt ALLE Geschäftsjahre in kpi_timeseries.
 """
 import logging
 from fastapi import APIRouter, Depends, Header, HTTPException, BackgroundTasks
@@ -112,97 +115,24 @@ def _build_response(company_name: str, db: Session) -> dict | None:
 
 
 def _fetch_and_parse_bg(company_name: str) -> None:
-    """Background Task: Fetch + Parse für company_name.
+    """Background Task: Fetch + Parse + KPI-Push für company_name.
     In-Flight-Guard verhindert parallele Fetches für denselben Namen.
+    KPI-04: push_kpi_to_argo() schreibt alle Geschäftsjahre in Argo kpi_timeseries.
     """
-    # Guard bereits im Route-Handler gesetzt — hier nur noch ausführen
     from src.database import SessionLocal
     from src.ba_fetcher import fetch_and_store
-    from src.ba_parser import parse_pending
+    from src.ba_parser import parse_pending, push_kpi_to_argo
 
     db = SessionLocal()
     try:
         fetch_and_store(company_name, db)
         parse_pending(db, limit=10)
+        push_kpi_to_argo(company_name, db)   # KPI-04: alle Geschäftsjahre pushen
     except Exception as e:
         logger.error("BG fetch+parse failed für '%s': %s", company_name, e)
     finally:
         _fetching.discard(company_name)
         db.close()
-
-
-def _push_kpi_to_argo(company_name: str, db: Session) -> int:
-    """
-    Schreibt alle ba_financials Zeitreihen-Rows für company_name
-    in Argo Supabase kpi_timeseries.
-    Wird vom Cron nach parse_pending aufgerufen.
-    Returns: Anzahl geschriebener Rows.
-    """
-    if not settings.argo_backend_url or not settings.argo_api_key:
-        logger.debug("_push_kpi_to_argo: argo_backend_url/api_key nicht konfiguriert — übersprungen")
-        return 0
-
-    fins = (
-        db.query(BAFinancial)
-        .filter_by(company_name=company_name)
-        .order_by(BAFinancial.fiscal_year.asc())
-        .all()
-    )
-    if not fins:
-        return 0
-
-    # Metriken die wir pushen — neutraler metric_name → BAFinancial-Attribut
-    # Naming-Konvention: metric-Key ist währungsneutral (_mn statt _eur_mn).
-    # Währung steht im currency-Feld — EDGAR schreibt später USD, gleiche Keys.
-    METRIC_MAP = {
-        "revenue_mn":       "revenue_eur_mn",
-        "ebitda_mn":        "ebitda_eur_mn",
-        "ebit_mn":          "ebit_eur_mn",
-        "net_income_mn":    "net_income_eur_mn",
-        "equity_mn":        "equity_eur_mn",
-        "total_assets_mn":  "total_assets_eur_mn",
-        "headcount":        "headcount",
-    }
-    _MONETARY = {"revenue_mn", "ebitda_mn", "ebit_mn", "net_income_mn", "equity_mn", "total_assets_mn"}
-
-    rows = []
-    for fin in fins:
-        if not fin.fiscal_year:
-            continue
-        for metric, attr in METRIC_MAP.items():
-            val = getattr(fin, attr, None)
-            if val is None:
-                continue
-            rows.append({
-                "metric":      metric,
-                "fiscal_year": fin.fiscal_year,
-                "value":       float(val),
-                "currency":    "EUR" if metric in _MONETARY else None,
-                "source":      "ba_bridge",
-                "confidence":  fin.confidence or "medium",
-            })
-
-    if not rows:
-        return 0
-
-    try:
-        import httpx
-        with httpx.Client(timeout=15) as client:
-            resp = client.post(
-                f"{settings.argo_backend_url}/api/v1/company/{company_name}/kpi-timeseries",
-                headers={"X-API-Key": settings.argo_api_key},
-                json={"rows": rows},
-            )
-        if resp.status_code == 200:
-            written = resp.json().get("written", 0)
-            logger.info("_push_kpi_to_argo '%s': %d Rows geschrieben", company_name, written)
-            return written
-        else:
-            logger.warning("_push_kpi_to_argo '%s': HTTP %s", company_name, resp.status_code)
-    except Exception as e:
-        logger.warning("_push_kpi_to_argo failed für '%s': %s", company_name, e)
-
-    return 0
 
 
 @router.get("/ba/company/{company_name}/history")

@@ -213,17 +213,106 @@ def parse_report(report: BAReport, db: Session) -> bool:
     return True
 
 
-def parse_pending(db: Session, limit: int = 20) -> int:
+def parse_pending(db: Session, limit: int = 20) -> tuple[int, list[str]]:
     """
     Batch-Parser: parst bis zu `limit` pending Reports.
     Wird vom Cron aufgerufen nach fetch_and_store.
-    Returns: Anzahl erfolgreich geparster Reports.
+
+    Returns:
+      (success_count, parsed_company_names)
+        parsed_company_names — deduplizierte Liste der Companies mit frisch
+        geparsten Finanzdaten. Cron ruft danach push_kpi_to_argo() je Company auf.
     """
     from src.ba_fetcher import get_pending_reports
     pending = get_pending_reports(db)[:limit]
     success = 0
+    parsed_companies: set[str] = set()
     for report in pending:
         if parse_report(report, db):
             success += 1
-    logger.info("parse_pending: %d/%d erfolgreich", success, len(pending))
-    return success
+            parsed_companies.add(report.company_name)
+    logger.info("parse_pending: %d/%d erfolgreich, Companies: %s", success, len(pending), list(parsed_companies))
+    return success, list(parsed_companies)
+
+
+def push_kpi_to_argo(company_name: str, db: Session) -> int:
+    """
+    KPI-04: Schreibt ALLE ba_financials Zeitreihen-Rows (alle Geschäftsjahre)
+    für company_name in Argo Supabase kpi_timeseries.
+
+    Wird aufgerufen:
+      - Nach on-demand fetch+parse in company.py _fetch_and_parse_bg()
+      - Vom Cron (main.py) nach parse_pending() für jede geparste Company
+
+    Returns: Anzahl geschriebener Rows (0 bei Fehler oder kein Backend-URL).
+    """
+    from src.config import settings
+    from src.models import BAFinancial
+
+    if not settings.argo_backend_url or not settings.argo_api_key:
+        logger.debug("push_kpi_to_argo: argo_backend_url/api_key nicht konfiguriert — übersprungen")
+        return 0
+
+    # KPI-04: ALLE Geschäftsjahre — nicht nur das neueste
+    fins = (
+        db.query(BAFinancial)
+        .filter_by(company_name=company_name)
+        .order_by(BAFinancial.fiscal_year.asc())
+        .all()
+    )
+    if not fins:
+        return 0
+
+    METRIC_MAP = {
+        "revenue_mn":      "revenue_eur_mn",
+        "ebitda_mn":       "ebitda_eur_mn",
+        "ebit_mn":         "ebit_eur_mn",
+        "net_income_mn":   "net_income_eur_mn",
+        "equity_mn":       "equity_eur_mn",
+        "total_assets_mn": "total_assets_eur_mn",
+        "headcount":       "headcount",
+    }
+    _MONETARY = {"revenue_mn", "ebitda_mn", "ebit_mn", "net_income_mn", "equity_mn", "total_assets_mn"}
+
+    rows = []
+    for fin in fins:
+        if not fin.fiscal_year:
+            continue
+        for metric, attr in METRIC_MAP.items():
+            val = getattr(fin, attr, None)
+            if val is None:
+                continue
+            rows.append({
+                "metric":      metric,
+                "fiscal_year": fin.fiscal_year,
+                "value":       float(val),
+                "currency":    "EUR" if metric in _MONETARY else None,
+                "source":      "ba_bridge",
+                "confidence":  fin.confidence or "medium",
+            })
+
+    if not rows:
+        logger.info("push_kpi_to_argo '%s': keine Felder befüllt — übersprungen", company_name)
+        return 0
+
+    try:
+        import httpx
+        with httpx.Client(timeout=15) as client:
+            resp = client.post(
+                f"{settings.argo_backend_url}/api/v1/company/{company_name}/kpi-timeseries",
+                headers={"X-API-Key": settings.argo_api_key},
+                json={"rows": rows},
+            )
+        if resp.status_code == 200:
+            written = resp.json().get("written", 0)
+            logger.info(
+                "push_kpi_to_argo '%s': %d Rows aus %d Geschäftsjahren geschrieben",
+                company_name, written, len(fins),
+            )
+            return written
+        else:
+            logger.warning("push_kpi_to_argo '%s': HTTP %s — %s", company_name, resp.status_code, resp.text[:200])
+    except Exception as e:
+        logger.warning("push_kpi_to_argo failed für '%s': %s", company_name, e)
+
+    return 0
