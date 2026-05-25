@@ -4,12 +4,13 @@ Shadow Enrichment Worker — BA-Bridge
 Füllt shadow_companies proaktiv mit Bundesanzeiger-Daten für deutsche private Companies.
 
 Zwei Jobs (via APScheduler in main.py):
-  1. seed_shadow_queue()    — täglich 03:30 UTC: neue DE Companies aus Wikipedia-Kategorie
+  1. seed_shadow_queue()    — täglich 03:30 UTC: neue DE GmbH-Companies aus Wikidata
   2. enrich_one_shadow()    — alle 2.5h: 1 pending Company via BA anreichern (≈10/Tag)
 
 Seed-Quelle:
-  Wikipedia DE Kategorie "Unternehmen_(Deutschland)" → paginiert, bis 500 Artikel.
+  Wikidata SPARQL → DE Companies mit Rechtsform GmbH / GmbH & Co. KG.
   Filtert: bereits in Supabase + bereits in shadow_companies.
+  Kein API-Key nötig. 1 Request pro Seed-Run.
   Zweck: Companies die der User noch NIE gesucht hat — proaktiver Pre-fetch.
 
 Prio-Score via Wikipedia Pageviews API (DE):
@@ -39,98 +40,70 @@ _WIKI_PAGEVIEWS_URL = (
     "https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article"
     "/de.wikipedia/all-access/all-agents/{title}/monthly/{start}/{end}"
 )
-_WIKI_CATEGORY_URL = "https://de.wikipedia.org/w/api.php"
 _WIKI_HEADERS = {"User-Agent": "ArgoAnalytics/1.0 (info@argo-analytics.io)"}
 
-# Klammerzusätze die aus Artikeltiteln entfernt werden
-_DISAMBIG_RE = re.compile(
-    r"\s*\((Unternehmen|Konzern|Firma|Gruppe|Deutschland|GmbH|AG|SE|KG)\)\s*$",
-    re.IGNORECASE,
-)
+# Wikidata SPARQL — DE GmbH-Companies
+_WIKIDATA_URL   = "https://query.wikidata.org/sparql"
+_WIKIDATA_QUERY = """
+SELECT DISTINCT ?companyLabel WHERE {
+  VALUES ?legalForm { wd:Q460377 wd:Q1915791 }
+  ?company wdt:P1454 ?legalForm ;
+           wdt:P17   wd:Q183 .
+  FILTER NOT EXISTS { ?company wdt:P576 [] }
+  ?company rdfs:label ?companyLabel .
+  FILTER(LANG(?companyLabel) = "de")
+}
+ORDER BY ?companyLabel
+LIMIT 2000
+"""
 
 
-# ── Wikipedia Kategorie-Abruf ─────────────────────────────────────────────────
+# ── Wikidata SPARQL Abruf ─────────────────────────────────────────────────────
 
-def _fetch_wikipedia_de_companies(limit: int = 500) -> list[str]:
+def _fetch_wikidata_de_gmbh_companies(limit: int = 500) -> list[str]:
     """
-    Holt Artikel-Titel aus Wikipedia DE Kategorie 'Unternehmen_(Deutschland)'.
+    Holt DE-GmbH-Unternehmen aus Wikidata via SPARQL.
 
-    Zweistufig — weil die Hauptkategorie nur wenige direkte Artikel hat:
-      Stufe 1: Subkategorien der Hauptkategorie holen (bis 100 Subkats)
-      Stufe 2: Pro Subkategorie direkte Artikel holen (bis 50 Artikel/Subkat)
-    Direkte Artikel der Hauptkategorie werden ebenfalls eingeschlossen.
-    Bereinigt Klammerzusätze aus Titeln. Gibt bereinigte, eindeutige Namen zurück.
+    Rechtsform: GmbH (Q460377) + GmbH & Co. KG (Q1915791)
+    Land:       Deutschland (Q183)
+    Filter:     aufgelöste Companies (P576) werden ausgeschlossen
+    Kein API-Key nötig. 1 HTTP-Request pro Seed-Run.
     """
-    _ROOT_CAT = "Kategorie:Unternehmen_(Deutschland)"
+    headers = {
+        "User-Agent": "ArgoAnalytics/1.0 (info@argo-analytics.io)",
+        "Accept":     "application/sparql-results+json",
+    }
+    try:
+        with httpx.Client(timeout=60, headers=headers) as client:
+            resp = client.get(
+                _WIKIDATA_URL,
+                params={"query": _WIKIDATA_QUERY, "format": "json"},
+            )
+        if resp.status_code != 200:
+            logger.warning(
+                "_fetch_wikidata_de_gmbh_companies HTTP %s", resp.status_code
+            )
+            return []
 
-    def _fetch_cat_members(cat_title: str, cmtype: str, max_items: int) -> list[str]:
-        """Holt Mitglieder (Seiten oder Subkats) einer Wikipedia-Kategorie."""
-        results: list[str] = []
-        params: dict = {
-            "action":  "query",
-            "list":    "categorymembers",
-            "cmtitle": cat_title,
-            "cmlimit": min(max_items, 500),
-            "cmtype":  cmtype,
-            "format":  "json",
-        }
-        try:
-            with httpx.Client(timeout=15, headers=_WIKI_HEADERS) as client:
-                while len(results) < max_items:
-                    resp = client.get(_WIKI_CATEGORY_URL, params=params)
-                    if resp.status_code != 200:
-                        break
-                    data    = resp.json()
-                    members = data.get("query", {}).get("categorymembers", [])
-                    results.extend(m.get("title", "") for m in members if m.get("title"))
-                    if "continue" in data:
-                        params["cmcontinue"] = data["continue"]["cmcontinue"]
-                    else:
-                        break
-        except Exception as e:
-            logger.warning("_fetch_cat_members failed für '%s': %s", cat_title, e)
-        return results
+        bindings = resp.json().get("results", {}).get("bindings", [])
+        seen:   set[str]  = set()
+        unique: list[str] = []
+        for b in bindings:
+            label = (b.get("companyLabel") or {}).get("value", "").strip()
+            if label and label.lower() not in seen:
+                seen.add(label.lower())
+                unique.append(label)
 
-    raw_titles: list[str] = []
+        logger.info(
+            "_fetch_wikidata_de_gmbh_companies: %d eindeutige GmbH-Companies "
+            "aus Wikidata", len(unique),
+        )
+        return unique[:limit]
 
-    # Stufe 1: direkte Artikel der Hauptkategorie (normalerweise wenige)
-    raw_titles += _fetch_cat_members(_ROOT_CAT, "page", max_items=500)
+    except Exception as e:
+        logger.warning("_fetch_wikidata_de_gmbh_companies failed: %s", e)
+        return []
 
-    # Stufe 2: Subkategorien → deren direkte Artikel
-    subcats = _fetch_cat_members(_ROOT_CAT, "subcat", max_items=100)
-    logger.info(
-        "_fetch_wikipedia_de_companies: %d Subkategorien gefunden", len(subcats)
-    )
-    for subcat in subcats:
-        if len(raw_titles) >= limit * 3:   # Buffer — nach Bereinigung bleiben weniger
-            break
-        pages = _fetch_cat_members(subcat, "page", max_items=50)
-        raw_titles += pages
-        time.sleep(0.05)   # Wikipedia Rate-Limit
-
-    # Bereinigen + deduplizieren
-    _NON_COMPANY = re.compile(
-        r"^(Liste|Verzeichnis|Übersicht|Geschichte|Chronik|Portal|Vorlage)\b",
-        re.IGNORECASE,
-    )
-    seen:   set[str]  = set()
-    unique: list[str] = []
-    for title in raw_titles:
-        if ":" in title:
-            continue   # Subkat-Reste überspringen
-        clean = _DISAMBIG_RE.sub("", title).strip()
-        if not clean or clean.lower() in seen:
-            continue
-        if _NON_COMPANY.match(clean):
-            continue   # Listenartikel + redaktionelle Artikel überspringen
-        seen.add(clean.lower())
-        unique.append(clean)
-
-    logger.info(
-        "_fetch_wikipedia_de_companies: %d eindeutige Companies aus Wikipedia DE",
-        len(unique),
-    )
-    return unique[:limit]
 
 
 # ── Supabase-Abruf (Ausschluss-Filter) ───────────────────────────────────────
@@ -195,18 +168,18 @@ def _get_prio_score(company_name: str) -> float:
 
 def seed_shadow_queue(db: Session) -> int:
     """
-    Befüllt Shadow-Queue mit deutschen Companies die noch NICHT in Supabase sind.
+    Befüllt Shadow-Queue mit deutschen GmbH-Companies die noch NICHT in Supabase sind.
 
-    Quelle:  Wikipedia DE Kategorie 'Unternehmen_(Deutschland)' (bis 500 Artikel)
+    Quelle:  Wikidata SPARQL — DE GmbH + GmbH & Co. KG (bis 500 Companies)
     Filter:  Bereits in Supabase → überspringen (Rolling Refresh reicht)
              Bereits in shadow_companies → überspringen
     Prio:    Wikipedia DE Pageviews (Würth/Aldi zuerst, Nischenplayer hinten)
 
-    Täglich 03:30 UTC + beim Startup wenn Queue leer.
+    Täglich 03:30 UTC + beim Startup wenn Queue < 10.
     """
-    wiki_names = _fetch_wikipedia_de_companies(limit=500)
-    if not wiki_names:
-        logger.warning("seed_shadow_queue: Wikipedia-Abruf leer — Seed abgebrochen")
+    wikidata_names = _fetch_wikidata_de_gmbh_companies(limit=500)
+    if not wikidata_names:
+        logger.warning("seed_shadow_queue: Wikidata-Abruf leer — Seed abgebrochen")
         return 0
 
     supabase_existing = _fetch_supabase_company_names()
@@ -216,15 +189,15 @@ def seed_shadow_queue(db: Session) -> int:
     }
 
     new_names = [
-        n for n in wiki_names
+        n for n in wikidata_names
         if n.lower() not in supabase_existing
         and n.lower() not in shadow_existing
     ]
 
     logger.info(
-        "seed_shadow_queue: %d Wikipedia-Namen → %d neu "
+        "seed_shadow_queue: %d Wikidata-Namen → %d neu "
         "(Supabase: %d, Shadow: %d bereits vorhanden)",
-        len(wiki_names), len(new_names),
+        len(wikidata_names), len(new_names),
         len(supabase_existing), len(shadow_existing),
     )
 
