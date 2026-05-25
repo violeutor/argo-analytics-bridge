@@ -36,6 +36,9 @@ from src.models_shadow import ShadowCompany
 
 logger = logging.getLogger(__name__)
 
+# Nach MAX_RETRIES erfolglosen BA-Versuchen → status='exhausted' (nicht mehr retried)
+MAX_RETRIES = 5
+
 _WIKI_PAGEVIEWS_URL = (
     "https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article"
     "/de.wikipedia/all-access/all-agents/{title}/monthly/{start}/{end}"
@@ -183,6 +186,35 @@ def _get_prio_score(company_name: str) -> float:
         return 10.0
 
 
+# ── Startup Cleanup ───────────────────────────────────────────────────────────
+
+def reset_stale_running(db: Session) -> int:
+    """
+    Setzt alle Companies im Status 'running' auf 'pending' zurück.
+
+    Wird beim BA-Bridge Startup aufgerufen — 'running' beim Start bedeutet
+    zwingend ein Crash-Relikt aus dem vorherigen Prozess (Render Redeploy,
+    OOM, etc.). Da enrich_one_shadow() sequentiell läuft und max. ein paar
+    Minuten dauert, gibt es keinen legitimen 'running'-Eintrag beim Startup.
+
+    retry_count wird NICHT zurückgesetzt — vorherige Versuche zählen weiter.
+    """
+    stale = (
+        db.query(ShadowCompany)
+        .filter(ShadowCompany.enrichment_status == "running")
+        .all()
+    )
+    for sc in stale:
+        sc.enrichment_status = "pending"
+    if stale:
+        db.commit()
+        logger.info(
+            "reset_stale_running: %d stale 'running' → 'pending' zurückgesetzt",
+            len(stale),
+        )
+    return len(stale)
+
+
 # ── Seed Job ──────────────────────────────────────────────────────────────────
 
 def seed_shadow_queue(db: Session) -> int:
@@ -302,13 +334,22 @@ def enrich_one_shadow(db: Session) -> bool:
         # Wenn kein Report gefetcht + kein BAFinancial vorhanden → zurück auf pending.
         # Shadow Company wird beim nächsten 2.5h-Run automatisch retried.
         if not reports and not fin:
-            sc.enrichment_status = "pending"
+            sc.retry_count = (sc.retry_count or 0) + 1
+            if sc.retry_count >= MAX_RETRIES:
+                sc.enrichment_status = "exhausted"
+                logger.info(
+                    "enrich_one_shadow: '%s' — exhausted nach %d Versuchen "
+                    "(kein BA-Treffer / CAPTCHA)",
+                    sc.name, sc.retry_count,
+                )
+            else:
+                sc.enrichment_status = "pending"
+                logger.info(
+                    "enrich_one_shadow: '%s' — kein BA-Treffer → pending "
+                    "(Versuch %d/%d, nächster Run in ~2.5h)",
+                    sc.name, sc.retry_count, MAX_RETRIES,
+                )
             db.commit()
-            logger.info(
-                "enrich_one_shadow: '%s' — kein BA-Treffer (CAPTCHA oder nicht "
-                "im Bundesanzeiger) → pending, Retry beim nächsten Run",
-                sc.name,
-            )
             return False
 
         if fin:
@@ -349,7 +390,18 @@ def enrich_one_shadow(db: Session) -> bool:
         return True
 
     except Exception as e:
-        logger.warning("enrich_one_shadow FAILED für '%s': %s", sc.name, e)
-        sc.enrichment_status = "error"
+        sc.retry_count = (sc.retry_count or 0) + 1
+        if sc.retry_count >= MAX_RETRIES:
+            sc.enrichment_status = "exhausted"
+            logger.warning(
+                "enrich_one_shadow: '%s' — exhausted nach %d Versuchen (Exception: %s)",
+                sc.name, sc.retry_count, e,
+            )
+        else:
+            sc.enrichment_status = "pending"
+            logger.warning(
+                "enrich_one_shadow FAILED '%s' (Versuch %d/%d): %s",
+                sc.name, sc.retry_count, MAX_RETRIES, e,
+            )
         db.commit()
         return False

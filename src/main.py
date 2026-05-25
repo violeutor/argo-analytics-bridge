@@ -142,6 +142,30 @@ async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine, tables=[ShadowCompany.__table__])
     logger.info("Shadow-DB initialisiert")
 
+    # ── Migration: retry_count Spalte (idempotent, läuft intern — kein externer DB-Zugriff) ──
+    try:
+        from sqlalchemy import text
+        with engine.connect() as _conn:
+            _conn.execute(text(
+                "ALTER TABLE shadow_companies "
+                "ADD COLUMN IF NOT EXISTS retry_count INTEGER DEFAULT 0"
+            ))
+            _conn.commit()
+        logger.info("Shadow-DB: retry_count Spalte sichergestellt")
+    except Exception as _e:
+        logger.warning("Shadow-DB retry_count Migration fehlgeschlagen: %s", _e)
+
+    # ── Startup Cleanup: stale 'running' → 'pending' ─────────────────────────
+    try:
+        from src.shadow_enrichment import reset_stale_running
+        _db_startup = SessionLocal()
+        try:
+            reset_stale_running(_db_startup)
+        finally:
+            _db_startup.close()
+    except Exception as _e:
+        logger.warning("Startup reset_stale_running fehlgeschlagen: %s", _e)
+
     scheduler.add_job(
         _cron_enrich_all,
         trigger="cron",

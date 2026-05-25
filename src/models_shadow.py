@@ -39,8 +39,10 @@ class ShadowCompany(Base):
 
     # ── Queue-Steuerung ───────────────────────────────────────────────────────
     prio_score          = Column(Float, default=10.0, index=True)
-    # pending | running | done | error
+    # pending | running | done | exhausted
+    # exhausted = MAX_RETRIES erreicht, kein weiterer Retry
     enrichment_status   = Column(String, default="pending", index=True)
+    retry_count         = Column(Integer, default=0)   # Zähler fehlgeschlagener BA-Versuche
     enriched_at         = Column(DateTime(timezone=True), nullable=True)
     promoted_at         = Column(DateTime(timezone=True), nullable=True)  # gesetzt wenn in Supabase übernommen
     created_at          = Column(
