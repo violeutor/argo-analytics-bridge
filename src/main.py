@@ -109,51 +109,6 @@ def _cron_shadow_enrich() -> None:
         db.close()
 
 
-def _cron_bafin_ownership() -> None:
-    """
-    EN-07: BaFin Stimmrechtsmitteilungen für listed DE Companies.
-    Täglich 03:15 UTC — vor Shadow Seed (03:30) + BA-Enrich (03:00).
-    Rate-Limit: 65s/Company → ~20 min für alle listed DE Companies.
-    Schreibt direkt in Argo Supabase ownership_entries.
-    """
-    import os
-    from src.bafin_ownership import run_bafin_ownership_cron
-
-    # Supabase Credentials — aus Env (selbe Vars wie andere Bridge-Supabase-Calls)
-    supabase_url = (
-        os.getenv("SUPABASE_URL")
-        or os.getenv("ARGO_SUPABASE_URL")
-        or getattr(settings, "supabase_url", None)
-        or ""
-    )
-    supabase_key = (
-        os.getenv("SUPABASE_SERVICE_KEY")
-        or os.getenv("SUPABASE_KEY")
-        or os.getenv("ARGO_SUPABASE_KEY")
-        or getattr(settings, "supabase_service_key", None)
-        or ""
-    )
-
-    if not supabase_url or not supabase_key:
-        logger.error(
-            "BaFin Cron: SUPABASE_URL/KEY nicht gesetzt — übersprungen. "
-            "Env-Vars prüfen: SUPABASE_URL, SUPABASE_SERVICE_KEY"
-        )
-        return
-
-    try:
-        logger.info("BaFin Ownership Cron gestartet")
-        stats = run_bafin_ownership_cron(supabase_url, supabase_key)
-        logger.info(
-            "BaFin Ownership Cron fertig — "
-            "%d Companies, %d Einträge geschrieben, %d Fehler",
-            stats["companies_with_data"],
-            stats["entries_written"],
-            stats["errors"],
-        )
-    except Exception as e:
-        logger.error("BaFin Ownership Cron FEHLER: %s", e)
-
 
 def _cron_beta_update() -> None:
     """
@@ -193,14 +148,6 @@ async def lifespan(app: FastAPI):
         hour=settings.cron_hour,
         minute=settings.cron_minute,
         id="daily_enrich",
-        replace_existing=True,
-    )
-    scheduler.add_job(
-        _cron_bafin_ownership,
-        trigger="cron",
-        hour=3,
-        minute=15,
-        id="daily_bafin_ownership",
         replace_existing=True,
     )
     scheduler.add_job(
@@ -255,8 +202,8 @@ async def lifespan(app: FastAPI):
         logger.warning("Startup Shadow-Seed-Check fehlgeschlagen: %s", e)
 
     logger.info(
-        "Crons gestartet: BA-Enrich %02d:%02d UTC · BaFin-Ownership 03:15 UTC · "
-        "Beta-Update 22:00 UTC",
+        "Crons gestartet: BA-Enrich %02d:%02d UTC · "
+        "Shadow-Seed 03:30 UTC · Beta-Update 22:00 UTC",
         settings.cron_hour, settings.cron_minute,
     )
 
@@ -315,11 +262,3 @@ async def trigger_shadow_enrich(background_tasks: BackgroundTasks):
     return {"status": "triggered", "job": "_cron_shadow_enrich"}
 
 
-@app.post("/bafin/trigger")
-async def trigger_bafin(background_tasks: BackgroundTasks):
-    """
-    Manueller Trigger für _cron_bafin_ownership.
-    BaFin Stimmrechtsmitteilungen sofort abrufen (Rate-Limit 65s/Company beachten).
-    """
-    background_tasks.add_task(_cron_bafin_ownership)
-    return {"status": "triggered", "job": "_cron_bafin_ownership"}
