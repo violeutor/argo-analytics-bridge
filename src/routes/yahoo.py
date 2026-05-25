@@ -13,6 +13,15 @@ Endpoints:
     GET /yahoo/ticker/{ticker}/damodaran?category={argo_category}
         → Branchen-Beta aus damodaran_beta für eine Argo-Kategorie
         → 200 OK | 404 Not Found
+
+    GET /yahoo/ownership/{ticker}
+        → Institutionelle Anteilseigner via yfinance (EN-08 Fallback)
+        → 200 OK (leere holders-Liste wenn keine Daten)
+
+Entfernt (Session 22):
+    GET /yahoo/fundamentals/{ticker}
+        → Verschoben in Argo Backend (company_detail._fetch_yf_fundamentals).
+           Bridge-Hop war unnötiger Overhead — kein Caching-Benefit für on-demand Fundamentals.
 """
 
 import logging
@@ -148,85 +157,6 @@ def get_damodaran_beta(
     )
     return _damodaran_to_dict(entry)
 
-
-# ---------------------------------------------------------------------------
-# GET /yahoo/fundamentals/{ticker}
-# YH-08 · Fundamentals via yfinance — Revenue, EBITDA, Margen, EV etc.
-# Wird von Argo Backend als Ersatz für quoteSummary genutzt (Free-Tier-kompatibel).
-# ---------------------------------------------------------------------------
-
-import yfinance as yf  # bereits in requirements.txt der Bridge
-
-
-@router.get("/fundamentals/{ticker}")
-def get_fundamentals(ticker: str):
-    """
-    Liefert Fundamentaldaten für einen Ticker via yfinance.
-    Kein DB-Cache — on-demand, Timeout 10s.
-
-    Response-Felder (alle optional / None wenn nicht verfügbar):
-        ticker, pe_ratio, week_52_high, week_52_low
-        revenue_bn, ebitda_bn, debt_ebitda
-        gross_margin_pct, operating_margin_pct, profit_margin_pct
-        revenue_growth_pct, earnings_growth_pct
-        free_cashflow_bn, operating_cashflow_bn
-        enterprise_value_bn, ev_revenue, ev_ebitda
-
-    HTTP-Status:
-        200 — immer (leere Felder = None, kein Hard-Fail)
-        422 — Ticker leer
-    """
-    ticker = ticker.strip().upper()
-    if not ticker:
-        raise HTTPException(status_code=422, detail="Ticker darf nicht leer sein.")
-
-    out: dict = {"ticker": ticker}
-    try:
-        yf_ticker = yf.Ticker(ticker)
-        info = yf_ticker.info or {}
-
-        def _pct(v) -> float | None:
-            return round(v * 100, 2) if v is not None else None
-
-        def _bn(v) -> float | None:
-            return round(v / 1e9, 3) if v else None
-
-        out["pe_ratio"]             = info.get("trailingPE")
-        out["week_52_high"]         = info.get("fiftyTwoWeekHigh")
-        out["week_52_low"]          = info.get("fiftyTwoWeekLow")
-        out["revenue_bn"]           = _bn(info.get("totalRevenue"))
-        out["ebitda_bn"]            = _bn(info.get("ebitda"))
-        out["gross_margin_pct"]     = _pct(info.get("grossMargins"))
-        out["operating_margin_pct"] = _pct(info.get("operatingMargins"))
-        out["profit_margin_pct"]    = _pct(info.get("profitMargins"))
-        out["revenue_growth_pct"]   = _pct(info.get("revenueGrowth"))
-        out["earnings_growth_pct"]  = _pct(info.get("earningsGrowth"))
-        out["free_cashflow_bn"]     = _bn(info.get("freeCashflow"))
-        out["operating_cashflow_bn"]= _bn(info.get("operatingCashflow"))
-
-        ev = info.get("enterpriseValue")
-        out["enterprise_value_bn"]  = _bn(ev)
-
-        rev = info.get("totalRevenue")
-        ebitda = info.get("ebitda")
-        debt = info.get("totalDebt")
-        if ebitda and debt:
-            out["debt_ebitda"] = round((debt / 1e9) / (ebitda / 1e9), 2)
-        if ev and rev:
-            out["ev_revenue"] = round(ev / rev, 1)
-        if ev and ebitda:
-            out["ev_ebitda"]  = round(ev / ebitda, 1)
-
-        log.info(
-            "[GET /yahoo/fundamentals/%s] OK — rev=%.1fBn margin=%.1f%%",
-            ticker,
-            out.get("revenue_bn") or 0,
-            out.get("gross_margin_pct") or 0,
-        )
-    except Exception as e:
-        log.warning("[GET /yahoo/fundamentals/%s] yfinance error: %s", ticker, e)
-
-    return out
 
 
 # ---------------------------------------------------------------------------
