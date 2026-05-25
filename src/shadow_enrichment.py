@@ -109,15 +109,22 @@ def _fetch_wikipedia_de_companies(limit: int = 500) -> list[str]:
         time.sleep(0.05)   # Wikipedia Rate-Limit
 
     # Bereinigen + deduplizieren
+    _NON_COMPANY = re.compile(
+        r"^(Liste|Verzeichnis|Übersicht|Geschichte|Chronik|Portal|Vorlage)\b",
+        re.IGNORECASE,
+    )
     seen:   set[str]  = set()
     unique: list[str] = []
     for title in raw_titles:
         if ":" in title:
             continue   # Subkat-Reste überspringen
         clean = _DISAMBIG_RE.sub("", title).strip()
-        if clean and clean.lower() not in seen:
-            seen.add(clean.lower())
-            unique.append(clean)
+        if not clean or clean.lower() in seen:
+            continue
+        if _NON_COMPANY.match(clean):
+            continue   # Listenartikel + redaktionelle Artikel überspringen
+        seen.add(clean.lower())
+        unique.append(clean)
 
     logger.info(
         "_fetch_wikipedia_de_companies: %d eindeutige Companies aus Wikipedia DE",
