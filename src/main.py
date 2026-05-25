@@ -12,9 +12,10 @@ Cron: täglich 03:00 UTC — fetch_and_store + parse_pending für alle Companies
 """
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from fastapi import FastAPI
+from fastapi import FastAPI, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.config import settings
@@ -225,6 +226,33 @@ async def lifespan(app: FastAPI):
         replace_existing=True,
     )
     scheduler.start()
+
+    # ── Startup-Hook: Shadow-Queue sofort seeden wenn leer ───────────────────
+    # Verhindert 24h Wartezeit nach Redeployment (Crons laufen zu festen UTC-Zeiten)
+    try:
+        from src.models_shadow import ShadowCompany
+        db_check = SessionLocal()
+        try:
+            queue_size = db_check.query(ShadowCompany).count()
+        finally:
+            db_check.close()
+
+        if queue_size == 0:
+            logger.info(
+                "Shadow-Queue leer nach Startup — _cron_shadow_seed wird sofort gefeuert"
+            )
+            scheduler.add_job(
+                _cron_shadow_seed,
+                trigger="date",
+                run_date=datetime.now(timezone.utc),
+                id="startup_shadow_seed",
+                replace_existing=True,
+            )
+        else:
+            logger.info("Shadow-Queue bei Startup: %d Companies vorhanden", queue_size)
+    except Exception as e:
+        logger.warning("Startup Shadow-Seed-Check fehlgeschlagen: %s", e)
+
     logger.info(
         "Crons gestartet: BA-Enrich %02d:%02d UTC · BaFin-Ownership 03:15 UTC · "
         "Beta-Update 22:00 UTC",
@@ -262,3 +290,35 @@ app.include_router(shadow_router)
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "ba-bridge"}
+
+
+# ── Manuelle Trigger (Debugging / Testing) ────────────────────────────────────
+
+@app.post("/shadow/seed/trigger")
+async def trigger_shadow_seed(background_tasks: BackgroundTasks):
+    """
+    Manueller Trigger für _cron_shadow_seed.
+    Sofortiges Seeden der Shadow-Queue ohne auf 03:30 UTC zu warten.
+    """
+    background_tasks.add_task(_cron_shadow_seed)
+    return {"status": "triggered", "job": "_cron_shadow_seed"}
+
+
+@app.post("/shadow/enrich/trigger")
+async def trigger_shadow_enrich(background_tasks: BackgroundTasks):
+    """
+    Manueller Trigger für _cron_shadow_enrich.
+    Enriched 1 pending Shadow-Company sofort.
+    """
+    background_tasks.add_task(_cron_shadow_enrich)
+    return {"status": "triggered", "job": "_cron_shadow_enrich"}
+
+
+@app.post("/bafin/trigger")
+async def trigger_bafin(background_tasks: BackgroundTasks):
+    """
+    Manueller Trigger für _cron_bafin_ownership.
+    BaFin Stimmrechtsmitteilungen sofort abrufen (Rate-Limit 65s/Company beachten).
+    """
+    background_tasks.add_task(_cron_bafin_ownership)
+    return {"status": "triggered", "job": "_cron_bafin_ownership"}
