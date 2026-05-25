@@ -48,8 +48,9 @@ def lookup_shadow_company(name: str, db: Session = Depends(_get_db)):
         .filter(
             func.lower(ShadowCompany.name).contains(name_q)
         )
-        # done vor pending vor running vor error
+        # Exakter Match zuerst, dann done vor pending, dann prio_score
         .order_by(
+            (func.lower(ShadowCompany.name) == name_q).desc(),
             (ShadowCompany.enrichment_status == "done").desc(),
             ShadowCompany.prio_score.desc(),
         )

@@ -128,7 +128,9 @@ def _fetch_supabase_company_names() -> set[str]:
     try:
         from supabase import create_client
         sb     = create_client(supabase_url, supabase_key)
-        result = sb.table("companies").select("name").execute()
+        # Limit 9999 — PostgREST-Default ist 1000, würde bei >1000 Companies
+        # den Exclusion-Filter still truncaten → Shadow-Duplikate
+        result = sb.table("companies").select("name").limit(9999).execute()
         return {r["name"].lower() for r in (result.data or []) if r.get("name")}
     except Exception as e:
         logger.warning("_fetch_supabase_company_names failed: %s", e)
@@ -205,6 +207,7 @@ def seed_shadow_queue(db: Session) -> int:
     added = 0
     for name in new_names:
         prio = _get_prio_score(name)
+        time.sleep(0.1)   # Wikimedia Rate-Limit — 500 Companies = ~50s gesamt, kein Burst
         db.add(ShadowCompany(
             name=name,
             prio_score=prio,
@@ -212,7 +215,6 @@ def seed_shadow_queue(db: Session) -> int:
             source="bundesanzeiger",
         ))
         added += 1
-        time.sleep(0.05)
 
     if added:
         db.commit()
@@ -237,7 +239,6 @@ def enrich_one_shadow(db: Session) -> bool:
     """
     from src.models import BAFinancial, BAPerson
     from src.ba_fetcher import fetch_and_store
-    from src.ba_parser import parse_pending
 
     sc: ShadowCompany | None = (
         db.query(ShadowCompany)
@@ -258,8 +259,20 @@ def enrich_one_shadow(db: Session) -> bool:
     db.commit()
 
     try:
-        fetch_and_store(sc.name, db)
-        parse_pending(db, limit=5)
+        # Rückgabewert capturen — [] bei CAPTCHA oder "nicht in BA"
+        reports = fetch_and_store(sc.name, db)
+
+        # Company-spezifisches Parsing — nicht alle pending Reports global abarbeiten
+        from src.models import BAReport as _BAReport
+        from src.ba_parser import parse_report as _parse_report
+        pending_for_company = (
+            db.query(_BAReport)
+            .filter_by(company_name=sc.name, parse_status="pending")
+            .limit(5)
+            .all()
+        )
+        for r in pending_for_company:
+            _parse_report(r, db)
 
         fin: BAFinancial | None = (
             db.query(BAFinancial)
@@ -267,6 +280,20 @@ def enrich_one_shadow(db: Session) -> bool:
             .order_by(BAFinancial.fiscal_year.desc().nullslast())
             .first()
         )
+
+        # BA-11 CAPTCHA-Propagation:
+        # fetch_and_store gibt [] bei CAPTCHA UND bei "nicht in BA".
+        # Wenn kein Report gefetcht + kein BAFinancial vorhanden → zurück auf pending.
+        # Shadow Company wird beim nächsten 2.5h-Run automatisch retried.
+        if not reports and not fin:
+            sc.enrichment_status = "pending"
+            db.commit()
+            logger.info(
+                "enrich_one_shadow: '%s' — kein BA-Treffer (CAPTCHA oder nicht "
+                "im Bundesanzeiger) → pending, Retry beim nächsten Run",
+                sc.name,
+            )
+            return False
 
         if fin:
             sc.ba_id               = str(fin.report_id)
