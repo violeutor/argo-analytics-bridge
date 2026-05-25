@@ -79,8 +79,9 @@ def _cron_enrich_all() -> None:
 
 def _cron_shadow_seed() -> None:
     """
-    Täglich 03:30 UTC: neue BA-Companies in Shadow-Queue aufnehmen.
-    Prio-Score via Wikipedia Pageviews API.
+    Täglich 03:30 UTC: neue DE Companies aus Wikipedia-Kategorie 'Unternehmen_(Deutschland)'
+    in Shadow-Queue aufnehmen. Filtert bereits in Supabase vorhandene Companies.
+    Prio-Score via Wikipedia DE Pageviews.
     """
     from src.shadow_enrichment import seed_shadow_queue
     db = SessionLocal()
