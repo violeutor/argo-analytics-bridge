@@ -5,7 +5,7 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    # Railway Postgres (Shadow-DB)
+    # Render Postgres (Shadow-DB)
     database_url: str
 
     # Anthropic (Claude NER)
@@ -13,6 +13,10 @@ class Settings(BaseSettings):
 
     # Optionaler API-Key für internen Zugriff (Argo-Backend → Bridge)
     bridge_api_key: str = ""
+
+    # Argo-Backend (Bridge → Argo) — für price_fetcher.py Ticker-Liste
+    argo_backend_url: str = ""          # z.B. https://argo-analytics-backend.onrender.com
+    argo_api_key: str = ""              # X-API-Key des Argo-Backends (gleicher Key wie Frontend nutzt)
 
     # Rate-Limit Bundesanzeiger (Sekunden zwischen Requests)
     ba_rate_limit_sec: float = 3.0
