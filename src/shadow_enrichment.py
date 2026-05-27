@@ -52,13 +52,24 @@ SELECT DISTINCT ?companyLabel WHERE {
   VALUES ?legalForm { wd:Q460377 wd:Q1915791 }
   ?company wdt:P1454 ?legalForm ;
            wdt:P17   wd:Q183 .
+  ?company wdt:P1375 [] .
   FILTER NOT EXISTS { ?company wdt:P576 [] }
+  FILTER NOT EXISTS { ?company wdt:P31 wd:Q13406463 }
   ?company rdfs:label ?companyLabel .
   FILTER(LANG(?companyLabel) = "de")
 }
 ORDER BY ?companyLabel
 LIMIT 2000
 """
+
+# OpenCorporates — DE GmbH aktiv, kostenlose API (kein Key nötig)
+_OPENCORP_URL = "https://api.opencorporates.com/v0.4/companies/search"
+_OPENCORP_PARAMS_BASE = {
+    "jurisdiction_code": "de",
+    "company_type":      "Gesellschaft mit beschraenkter Haftung",
+    "current_status":    "Active",
+    "per_page":          100,
+}
 
 
 # ── Wikidata SPARQL Abruf ─────────────────────────────────────────────────────
@@ -126,6 +137,72 @@ def _fetch_wikidata_de_gmbh_companies(limit: int = 500) -> list[str]:
 
     return []
 
+
+
+# ── OpenCorporates Abruf ──────────────────────────────────────────────────────
+
+def _fetch_opencorporates_de_gmbh_companies(pages: int = 5) -> list[str]:
+    """
+    Holt aktive DE GmbH-Companies aus OpenCorporates (kostenlose API, kein Key).
+    pages x 100 Companies pro Aufruf — default 5 Seiten = 500 Companies.
+    Dedupliziert. Bei Rate-Limit (429) oder Fehler: leere Liste.
+    """
+    headers = {"User-Agent": "ArgoAnalytics/1.0 (info@argo-analytics.io)"}
+    seen:   set[str]  = set()
+    result: list[str] = []
+
+    with httpx.Client(timeout=15, headers=headers) as client:
+        for page in range(1, pages + 1):
+            try:
+                params = {**_OPENCORP_PARAMS_BASE, "page": page}
+                resp   = client.get(_OPENCORP_URL, params=params)
+
+                if resp.status_code == 429:
+                    logger.warning(
+                        "_fetch_opencorporates_de_gmbh_companies: 429 auf Seite %d — abgebrochen",
+                        page,
+                    )
+                    break
+
+                if resp.status_code != 200:
+                    logger.warning(
+                        "_fetch_opencorporates_de_gmbh_companies HTTP %s auf Seite %d",
+                        resp.status_code, page,
+                    )
+                    break
+
+                companies = (
+                    resp.json()
+                    .get("results", {})
+                    .get("companies", [])
+                )
+                if not companies:
+                    break
+
+                for item in companies:
+                    name = (
+                        (item.get("company") or {})
+                        .get("name", "")
+                        .strip()
+                    )
+                    if name and name.lower() not in seen:
+                        seen.add(name.lower())
+                        result.append(name)
+
+                time.sleep(0.5)   # OpenCorporates Rate-Limit
+
+            except Exception as e:
+                logger.warning(
+                    "_fetch_opencorporates_de_gmbh_companies failed (Seite %d): %s",
+                    page, e,
+                )
+                break
+
+    logger.info(
+        "_fetch_opencorporates_de_gmbh_companies: %d Companies abgerufen",
+        len(result),
+    )
+    return result
 
 
 # ── Supabase-Abruf (Ausschluss-Filter) ───────────────────────────────────────
@@ -221,16 +298,36 @@ def seed_shadow_queue(db: Session) -> int:
     """
     Befüllt Shadow-Queue mit deutschen GmbH-Companies die noch NICHT in Supabase sind.
 
-    Quelle:  Wikidata SPARQL — DE GmbH + GmbH & Co. KG (bis 500 Companies)
+    Quellen:
+      1. Wikidata SPARQL — DE GmbH + GmbH & Co. KG (geschärft: HR-Nummer-Filter,
+         Listen-Artikel-Ausschluss)
+      2. OpenCorporates — aktive DE GmbHs (kostenlose API, 5 Seiten = 500 Companies)
+    Beide Quellen werden zusammengeführt und dedupliziert.
+
     Filter:  Bereits in Supabase → überspringen (Rolling Refresh reicht)
              Bereits in shadow_companies → überspringen
     Prio:    Wikipedia DE Pageviews (Würth/Aldi zuerst, Nischenplayer hinten)
 
     Täglich 03:30 UTC + beim Startup wenn Queue < 10.
     """
+    # Quelle 1: Wikidata (geschärfter Query mit HR-Nummer-Filter)
     wikidata_names = _fetch_wikidata_de_gmbh_companies(limit=500)
-    if not wikidata_names:
-        logger.warning("seed_shadow_queue: Wikidata-Abruf leer — Seed abgebrochen")
+    logger.info("seed_shadow_queue: Wikidata → %d Companies", len(wikidata_names))
+
+    # Quelle 2: OpenCorporates (aktive DE GmbHs)
+    opencorp_names = _fetch_opencorporates_de_gmbh_companies(pages=5)
+    logger.info("seed_shadow_queue: OpenCorporates → %d Companies", len(opencorp_names))
+
+    # Zusammenführen + deduplizieren (Wikidata hat Prio bei Namens-Konflikt)
+    seen: set[str] = set()
+    combined: list[str] = []
+    for name in wikidata_names + opencorp_names:
+        if name.lower() not in seen:
+            seen.add(name.lower())
+            combined.append(name)
+
+    if not combined:
+        logger.warning("seed_shadow_queue: beide Quellen leer — Seed abgebrochen")
         return 0
 
     supabase_existing = _fetch_supabase_company_names()
@@ -240,22 +337,22 @@ def seed_shadow_queue(db: Session) -> int:
     }
 
     new_names = [
-        n for n in wikidata_names
+        n for n in combined
         if n.lower() not in supabase_existing
         and n.lower() not in shadow_existing
     ]
 
     logger.info(
-        "seed_shadow_queue: %d Wikidata-Namen → %d neu "
+        "seed_shadow_queue: %d kombiniert (WD=%d OC=%d) → %d neu "
         "(Supabase: %d, Shadow: %d bereits vorhanden)",
-        len(wikidata_names), len(new_names),
+        len(combined), len(wikidata_names), len(opencorp_names), len(new_names),
         len(supabase_existing), len(shadow_existing),
     )
 
     added = 0
     for name in new_names:
         prio = _get_prio_score(name)
-        time.sleep(0.1)   # Wikimedia Rate-Limit — 500 Companies = ~50s gesamt, kein Burst
+        time.sleep(0.1)   # Wikimedia Rate-Limit — kein Burst
         db.add(ShadowCompany(
             name=name,
             prio_score=prio,
