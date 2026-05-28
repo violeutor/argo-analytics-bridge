@@ -167,7 +167,7 @@ class HandelsregisterClient:
     def __init__(self, api_key: str):
         self.session = requests.Session()
         self.session.headers.update({
-            "Authorization": f"Bearer {api_key}",
+            "x-api-key": api_key,
             "Accept": "application/json",
         })
 
@@ -184,8 +184,8 @@ class HandelsregisterClient:
                 print(f"  ⚠️  Rate-Limit (429) — 5s warten …")
                 time.sleep(5)
                 return self.search(keyword, limit, skip)  # einmal retry
-            if r.status_code == 401:
-                sys.exit("❌  API-Key ungültig (401). Prüfe HANDELSREGISTER_API_KEY.")
+            if r.status_code in (401, 403):
+                sys.exit(f"❌  API-Key ungültig ({r.status_code}). Prüfe HANDELSREGISTER_API_KEY.")
             r.raise_for_status()
             data = r.json()
             # API gibt je nach Version list oder {"results": [...]} zurück
@@ -218,6 +218,18 @@ def is_gmbh_like(entry: dict) -> bool:
     return "GmbH" in name or "UG (haftungsbeschränkt)" in name
 
 
+def is_active(entry: dict) -> bool:
+    """
+    Prüft ob Company aktiv ist.
+    API-Feld: 'status' — bekannte Werte: 'ACTIVE', 'INACTIVE', 'DISSOLVED'.
+    Fallback: True (lieber zu viel als zu wenig wenn Feld fehlt).
+    """
+    status = (entry.get("status") or "").upper()
+    if not status:
+        return True  # Kein Status-Feld → nicht ausfiltern
+    return status == "ACTIVE"
+
+
 def extract_name(entry: dict) -> str | None:
     """Extrahiert den Unternehmensnamen aus einem API-Eintrag."""
     for field in ("name", "company_name", "firma", "unternehmensname"):
@@ -234,8 +246,9 @@ def fetch_keyword(
     keyword: str,
     max_pages: int,
     dry_run: bool,
+    active_only: bool = True,
 ) -> list[str]:
-    """Fetcht alle Seiten für ein Keyword, filtert GmbH, gibt Namen zurück."""
+    """Fetcht alle Seiten für ein Keyword, filtert GmbH (+ optional aktiv), gibt Namen zurück."""
     results: list[str] = []
 
     for page in range(max_pages):
@@ -251,6 +264,8 @@ def fetch_keyword(
             break  # Keine weiteren Ergebnisse
 
         for entry in entries:
+            if active_only and not is_active(entry):
+                continue
             if is_gmbh_like(entry):
                 name = extract_name(entry)
                 if name:
@@ -263,7 +278,7 @@ def fetch_keyword(
     return results
 
 
-def run(api_key: str, out_path: Path, dry_run: bool, page_limit: int | None) -> None:
+def run(api_key: str, out_path: Path, dry_run: bool, page_limit: int | None, active_only: bool = True) -> None:
     client = HandelsregisterClient(api_key)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -287,13 +302,14 @@ def run(api_key: str, out_path: Path, dry_run: bool, page_limit: int | None) -> 
         min(pages, page_limit) for _, pages, _ in KEYWORDS
     )
     print(f"\n🔑  Geschätzte Credits: {estimated}")
-    print(f"📋  Keywords: {len(KEYWORDS)}\n")
+    print(f"📋  Keywords: {len(KEYWORDS)}")
+    print(f"🔘  Nur aktive Companies: {'ja' if active_only else 'nein'}\n")
 
     for keyword, max_pages, sector in KEYWORDS:
         effective_pages = min(max_pages, page_limit) if page_limit else max_pages
         print(f"  🔍  {keyword!r:<40} [{sector}] — {effective_pages} page(s)")
 
-        names = fetch_keyword(client, keyword, effective_pages, dry_run)
+        names = fetch_keyword(client, keyword, effective_pages, dry_run, active_only)
         total_calls += effective_pages if not dry_run else 0
 
         new_names = [n for n in names if n not in existing and n not in all_new]
@@ -350,6 +366,11 @@ def main() -> None:
         help=f"Output-Datei (default: {DEFAULT_OUT})",
     )
     parser.add_argument(
+        "--all-statuses",
+        action="store_true",
+        help="Auch inaktive / gelöschte Companies einschließen (default: nur ACTIVE)."
+    )
+    parser.add_argument(
         "--limit",
         type=int,
         default=None,
@@ -373,6 +394,7 @@ def main() -> None:
         out_path=args.out,
         dry_run=args.dry_run,
         page_limit=args.limit,
+        active_only=not args.all_statuses,
     )
 
 
