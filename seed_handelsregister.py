@@ -345,7 +345,7 @@ def run(api_key: str, out_path: Path, dry_run: bool, page_limit: int | None, act
         print(f"\n   ⚠️  DRY-RUN — keine Datei geschrieben, keine Credits verbraucht.")
     else:
         print(f"\n   📄  Output: {out_path}")
-        print(f"   → Committen: git add {out_path.relative_to(Path.cwd())} && git commit -m 'data: shadow seed DE GmbH update'")
+        print(f"   → Committen: git add seed_data/de_gmbh_curated.txt && git commit -m 'data: shadow seed DE GmbH update'")
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
