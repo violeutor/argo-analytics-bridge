@@ -1,0 +1,612 @@
+SOLON Photovoltaik GmbH
+Stoiber Photovoltaik GmbH
+Biber Photovoltaik GmbH
+REINKE Photovoltaik GmbH
+Krumbach Photovoltaik GmbH
+Stuis Photovoltaik GmbH
+Photovoltaik Herz GmbH
+VG Photovoltaik GmbH
+SBU Photovoltaik GmbH
+MVV Windenergie GmbH
+SL Windenergie GmbH
+Windenergie Merzig GmbH
+NET Windenergie GmbH
+CNR WindEnergie GmbH
+Windenergie Britten GmbH
+Stahl Windenergie GmbH
+MHB Windenergie GmbH
+WERA Windenergie GmbH
+Windenergie Körrenzig GmbH
+Batteriespeicher Künzing GmbH
+Batteriespeicher Münster GmbH
+Batteriespeicher Guntersblum GmbH
+Beckumer Batteriespeicher GmbH
+Batteriespeicher Knetzgau GmbH
+Batteriespeicher Ohlstadt GmbH
+Batteriespeicher Etzenricht GmbH
+Batteriespeicher Wildpoldsried GmbH
+Batteriespeicher Borgwardstraße GmbH
+Batteriespeicher Saarlouis GmbH
+HyTec Elektrolyse GmbH
+Elektrolyse Mitteldeutschland GmbH
+Wasserstoff H2O + Elektrolyse-Technologie GmbH
+EKONAMI Elektrolyse GmbH
+Berosafe-Elektrolyse GmbH
+ELT Elektrolyse-Technik GmbH
+Eilenburger Elektrolyse- und Umwelttechnik GmbH
+Guldager GmbH & Co. KG
+Guldager GmbH
+Bremer Wasserstoff GmbH
+BER Wasserstoff GmbH
+Wasserstoff BAR GmbH
+Hy2B Wasserstoff GmbH
+Anumar Wasserstoff GmbH
+Möhring Wasserstoff GmbH
+Deutsche Wasserstoff GmbH
+Wasserstoff Weißenfels GmbH
+Bitterfeld-Wolfener Wasserstoff GmbH
+Creos Deutschland Wasserstoff GmbH
+IEU Solar & Stromspeicher GmbH
+Malta Hochtemperatur Wärmepumpen Stromspeicher GmbH
+4. Wiemersdorfer Stromspeicher GmbH & Co. KG
+6. Wiemersdorfer Stromspeicher GmbH & Co. KG
+5. Wiemersdorfer Stromspeicher GmbH & Co. KG
+1. Wiemersdorfer Stromspeicher GmbH & Co. KG
+7. Wiemersdorfer Stromspeicher GmbH & Co. KG
+2. Wiemersdorfer Stromspeicher GmbH & Co. KG
+3. Wiemersdorfer Stromspeicher GmbH & Co. KG
+8. Wiemersdorfer Stromspeicher GmbH & Co. KG
+Geothermie Holzkirchen GmbH
+FG GEOTHERMIE GmbH
+Geothermie Management GmbH
+COWI Geothermie GmbH
+Geothermie Ammersee GmbH
+SWE Geothermie GmbH
+West Geothermie GmbH
+Profunda Geothermie GmbH
+Geothermie Isartal GmbH
+E1 Energiemanagement GmbH
+bautec Energiemanagement GmbH
+GSG Energiemanagement GmbH
+ÖKOTEC Energiemanagement GmbH
+OptiPower Energiemanagement GmbH
+Augustinum Energiemanagement GmbH
+Iwik Energiemanagement GmbH
+Plantech Energiemanagement GmbH
+MM Energiemanagement GmbH
+IWEN Energy Institute gGmbH
+IHRE Wärmepumpe GmbH
+Fortuna Wärmepumpe GmbH
+waermepumpe.one GmbH
+Thermoplus Wärmepumpe Technology GmbH
+Derön Wärmepumpe Technik GmbH
+co2.auto GmbH
+co22 GmbH
+ENERGY-CO2.com GmbH
+Optocorp GmbH
+co2f-engineers Verwaltungs GmbH
+co2f-engineers GmbH & Co. KG
+Com cop GmbH & Co. KG.
+BKKT - Benrather Kühl- und Klimatechnologie GmbH
+Edeka Hessenring Zertifikat- und Vermögensverwaltungs GmbH
+ESTURION Nachhaltigkeitsberatung GmbH
+Edenberg Nachhaltigkeitsberatung GmbH
+Intep - Nachhaltigkeitsberatung GmbH
+HULTGREN Nachhaltigkeitsberatung UG (haftungsbeschränkt)
+Norddeutsche Nachhaltigkeitsberatung UG (haftungsbeschränkt)
+EN+C Energie- und Nachhaltigkeitsberatung GmbH
+ZERO-FOOTPRINT -Umwelt- und Nachhaltigkeitsberatung- gGmbH
+Triple-E Elektromobilität GmbH
+eM-Pro Elektromobilität GmbH
+REISS Elektromobilität GmbH & Co KG
+EG Elektromobilität GmbH & Co. KG
+IAE Institut für Automobiltechnik und Elektromobilität GmbH
+CemiN GmbH Centrum für Elektromobilität in Niedersachsen
+Ladeinfrastruktur Mittelhessen GmbH
+BIGGE ENERGIE Ladeinfrastruktur GmbH
+TR Ladeinfrastruktur UG (haftungsbeschränkt)
+Sustainable Aviation Lab GmbH
+AFS Aviation Fuel Services GmbH
+AFS Aviation Fuel Services Frankfurt GmbH
+BSAF Blue Sky Aviation Fuel GmbH
+Aviation Fuel Projects Consulting GmbH & Co. KG
+ZVNL Schienenfahrzeug GmbH (ZVNLS)
+IGENO Schienenfahrzeug GmbH Niedersachswerfen
+TALBOT Schienenfahrzeug Beteiligungs UG (haftungsbeschränkt)
+VSU - Entwicklungsverbund für Verkehrslösungen, Schienenfahrzeug- und Umschlagtechnik GmbH
+Die letzte Meile GmbH
+Widdel Industrieautomation GmbH
+Krüger Industrieautomation GmbH
+FOCUS Industrieautomation GmbH
+G.M.W. Industrieautomation GmbH
+gmo Industrieautomation GmbH
+EFS Industrieautomation GmbH
+MBI Industrieautomation GmbH
+Bomatec Industrieautomation GmbH
+Manthern Industrieautomation GmbH
+Industrieautomation Hildesheim GmbH
+voraus robotik GmbH
+Kraken Robotik GmbH
+SCS Robotik GmbH
+Dehne Robotik GmbH
+EduArt Robotik GmbH
+Th4mat Robotik GmbH
+FPT Robotik Verwaltungs GmbH
+HEBA GmbH Fertigungsautomatisierung
+SYMACON Fertigungsautomatisierung GmbH
+ITM-predictive GmbH
+Predictive Financing GmbH
+Delicious Data GmbH
+ROKOCO Predictive Analytics GmbH
+PAD GmbH
+FloodWaive Predictive Intelligence GmbH
+PAT Predictive Advertising Technologies GmbH
+predictivepartners GmbH
+MAI Maintenance Group GmbH
+ELSA automation maintenance GmbH
+AMM Prozessoptimierung GmbH
+K104 Prozessoptimierung GmbH
+CNCart GmbH Anlagen- & Prozessoptimierung
+Fahl Informationstechnik und Prozessoptimierung GmbH
+Armin Lausterer Ingenieurbüro für Prozessoptimierung GmbH
+REMONDIS Thermische Abfallverwertung GmbH
+B.A.T. Biologische Abfallverwertung GmbH Templin
+Buhck Abfallverwertung und Recycling GmbH & Co. KG
+BAV Boden- und Abfallverwertung GmbH & Co. KG
+Kreislaufwirtschaft Duisburg GmbH
+Vogt Kreislaufwirtschaft GmbH
+Knittel GmbH Kreislaufwirtschaft
+ENTEG Kreislaufwirtschaft GmbH
+Borchers Kreislaufwirtschaft GmbH
+Kreislaufwirtschaft Stade GmbH
+REWO Kreislaufwirtschaft GmbH
+Kreislaufwirtschaft Maurer Verwaltung GmbH
+halbleiter GmbH
+Halbleiter UG (haftungsbeschränkt)
+Halbleiter Dr. Herrmann GmbH
+HBB Halbleiter Bauelemente GmbH
+SH - Halbleiter Electronic Vertrieb GmbH
+HTV Electronic Halbleiter Technik Vertrieb GmbH
+KETEK GmbH Halbleiter- und Reinraumtechnik
+HEV HALBLEITER-ELECTRONIC Vertriebs-GmbH
+Gräfe Chemie GmbH
+Sunrise Polymer GmbH
+futura chemie GmbH
+Brechensbauer Verwaltungs GmbH
+bekro chemie GmbH & Co. KG
+BRC-Batterierecycling Schönebeck GmbH
+SWAP (Sachsen) GmbH Verbundwerkstoffe
+INVENT Innovative Verbundwerkstoffe Realisation und Vermarktung neuer Technologien GmbH
+Arché Assets International GmbH
+GREENBOATS GmbH
+Leibniz-Institut für Verbundwerkstoffe GmbH
+GTS Flexible Materials GmbH
+POLYCON VERBUNDWERKSTOFFE GmbH
+FVW Faser- und Verbundwerkstoffe GmbH
+SIGMA - Verbundwerkstoffe Gruber GmbH & Co.
+Proteinea GmbH
+Proteineer GmbH
+Orange Tree Vertriebs GmbH
+as2 alternative solutions GmbH
+Renoc alternative Energien GmbH
+AEN alternative Energien GmbH
+AQ Vertical Farming GmbH
+Association for Vertical Farming Projekt UG (haftungsbeschränkt)
+Vertical Farming - Green Products and Services GmbH
+FARM UP Vertical Farming GmbH & Co. KG
+EpiGene GmbH Biotechnologie im Pflanzenschutz
+Gebäudeautomation Hannover GmbH
+Fiehn Gebäudeautomation GmbH
+RHK Gebäudeautomation GmbH
+TEKKO Gebäudeautomation GmbH
+Hehl Gebäudeautomation GmbH
+Kindler Gebäudeautomation GmbH
+SER Gebäudeautomation GmbH
+AR Gebäudeautomation GmbH
+KSR Gebäudeautomation GmbH
+Smart Building GmbH
+mantro smart building GmbH
+SCALTEL Smart Building GmbH
+Smart Building Innovation gGmbH
+MF Smart Building GmbH
+Smart Building FOR YOU GmbH
+i CON smart building solutions GmbH
+SBT Smart Building Technologies UG (haftungsbeschränkt)
+SBS-Smart Building Solution GmbH
+SBS-Smart Building Solutions Dienstleistungsservice GmbH
+Hähnel Bautechnologie GmbH
+Ecoracasa Bautechnologie UG (haftungsbeschränkt)
+Dr. Beitzel Bautechnologie GmbH & Co. KG
+Engelhardt Bautechnologie GmbH
+Construtec Bautechnologie GmbH
+Eico Bautechnologie GmbH
+GT Bautechnologie UG (haftungsbeschränkt)
+IBT Integrierte Bautechnologie GmbH
+AFMS Advanced Facility Management Software UG (haftungsbeschränkt)
+SCE facility management GmbH
+MONTOR facility management GmbH
+optimmo facility management GmbH
+cleanMaster facility management GmbH
+ZECH Facility Management GmbH
+ESG Facility Management GmbH
+NICE Facility Management GmbH
+BT Facility Management GmbH
+AHN Biotechnologie GmbH
+MicroCoat Biotechnologie GmbH
+ARKA Biotechnologie GmbH
+Congen Biotechnologie GmbH
+Quartett Biotechnologie GmbH
+Davids Biotechnologie GmbH
+goodBIONICS Biotechnologie GmbH
+Halotek Biotechnologie GmbH
+Ahoora Biotechnologie GmbH
+PhytoAR Biotechnologie GmbH
+oeka medizintechnik GmbH
+heckel medizintechnik GmbH
+LOGICA Medizintechnik GmbH
+Sutter Medizintechnik GmbH
+inomed Medizintechnik GmbH
+VBM Medizintechnik GmbH
+olicoo Diagnostik GmbH
+Una Diagnostik GmbH
+STREIT Diagnostik GmbH
+Gladus Diagnostik GmbH
+BTG Diagnostik GmbH
+GSS Diagnostik GmbH
+BJ Diagnostik GmbH
+KH Diagnostik GmbH
+Business Diagnostik GmbH
+AOS Diagnostik GmbH
+Dilthey Data Science und Genomik UG (haftungsbeschränkt)
+Institut für Digitale Gesundheit (IDG) gemeinnützige GmbH
+Institut für Biotechnologie und Wirkstoffforschung gGmbH
+KIBG - Künstliche Intelligenz Beteiligungen GmbH
+Deutsches Forschungszentrum für Künstliche Intelligenz GmbH
+Akademie für künstliche Intelligenz AKI gGmbH
+BZKI Bildungszentrum für künstliche Intelligenz GmbH
+Innovationspark Künstliche Intelligenz Aleph Alpha gGmbH
+Technologisches Institut für angewandte Künstliche Intelligenz GmbH
+Machine Learning Reply GmbH
+Gauss Machine Learning GmbH
+Frankfurt Machine Learning GmbH
+PREA mercury Machine Learning and AI Real Estate Solutions GmbH
+One Thousand GmbH
+TOGNOS Deep Machine Learning GmbH
+Kontingenz Machine Learning UG (haftungsbeschränkt)
+AMLS Advanced Machine Learning Solutions GmbH
+The Learning Machine UG (haftungsbeschränkt)
+Agentur für Innovation in der Cybersicherheit GmbH
+GARBE IP Holding GmbH
+CDH computing GmbH
+DE computing GmbH
+MuK computing GmbH
+lambda computing GmbH
+wpd infrastruktur GmbH
+cc cloud GmbH
+aqua cloud GmbH
+c13 cloud GmbH
+unique cloud GmbH
+tap2.cloud GmbH
+ICTAN GmbH
+united cloud GmbH
+cloud trucks GmbH
+cloud related GmbH
+Gerwing ERP-Software GmbH
+Xentral ERP Software GmbH
+TPOS ERP Software und Kassen GmbH
+Avista ERP Software GmbH & Co. KG
+Vimata Group GmbH
+Convotis Holding GmbH
+ERP-Software Beteiligung GmbH
+ESIS-ERP SOFTWARE GmbH
+SBASE ERP Software UG (haftungsbeschränkt)
+Software Südbaden GmbH
+Systemhaus ArcSoftGmbH
+epos systemhaus GmbH
+id systemhaus GmbH
+mehrwert systemhaus GmbH
+villadata systemhaus GmbH
+CGM Systemhaus GmbH
+PK SYSTEMHAUS GmbH
+KNE Systemhaus GmbH
+CPS Systemhaus GmbH
+INGENTIS Softwareentwicklung GmbH
+Cloudev Softwareentwicklung GmbH
+Hahn Softwareentwicklung GmbH
+CESOFT Softwareentwicklung GmbH
+Softwareentwicklung Schittkowski GmbH
+tecMEDICS Softwareentwicklung GmbH
+KASUCOM Softwareentwicklung GmbH
+Schiemann Softwareentwicklung GmbH
+ODYSYS Softwareentwicklung GmbH
+ACETO Softwareentwicklung GmbH
+Förster IT-Dienstleistungen GmbH
+ICSS IT-Dienstleistungen GmbH
+quattec IT-Dienstleistungen GmbH
+IT-Dienstleistungen Weiß GmbH
+Torra IT-Dienstleistungen GmbH
+MERLE IT-Dienstleistungen GmbH
+Kirchenbauer IT-Dienstleistungen GmbH
+Mylek IT-Dienstleistungen GmbH
+Zeitschel IT-Dienstleistungen GmbH
+NSC IT-Dienstleistungen GmbH
+rst IT-Unternehmensberatung GmbH
+ASXX GmbH IT-Unternehmensberatung
+control.IT Unternehmensberatung GmbH
+Heidjer IT-Logic Unternehmensberatung GmbH
+UN-IT Unternehmensberatung- und Dienstleistung GmbH
+enjoy-IT.net Unternehmensberatung GmbH
+Login-IT Unternehmensberatung für Informationstechnologien und Organisationsplanung GmbH & Co. KG
+Nu Finanztechnologie GmbH
+CCROPP Finanztechnologie GmbH
+macros Financial Technology Consult GmbH
+Digicom Verlag- und Software GmbH & Co. Vermögensverwaltung KG
+JUDO Wasseraufbereitung GmbH
+aqmos Wasseraufbereitung GmbH
+ATN Wasseraufbereitung GmbH
+Lubron Wasseraufbereitung GmbH
+Weil Wasseraufbereitung GmbH
+ASANA Wasseraufbereitung GmbH
+Aquintos Wasseraufbereitung GmbH
+Mösslein Wasseraufbereitung GmbH
+H u m m e l Wasseraufbereitung GmbH
+Krämer Wasseraufbereitung GmbH
+Matejka Abfallmanagement GmbH
+UTS Abfallmanagement GmbH
+MSN Abfallmanagement GmbH
+MB Abfallmanagement GmbH
+AMB AbfallManagement Berlin GmbH
+Abfallmanagement Plus Bayern (AMP) GmbH
+BS Abfallmanagement und Umwelttechnik GmbH
+AKB Abfallmanagement Kampfmittelerkundung Bauberatung GmbH
+FF-Abfallmanagement GmbH
+Greenback Recycling Technologie GmbH
+EcoTec GmbH Refill und Recycling Technologie
+Eu-rotec Technologie und Rohstoff Marketing und Recycling GmbH
+Rubbertronic Recycling Technologie GmbH
+F. E. S. Recycling Technologie GmbH
+TRZ Technologie u. Recycling Zentrum GmbH
+TRP Technologie und Recycling Park Bernburg GmbH
+FReSiTec Freiberger Recycling und Silicium Technologie GmbH
+mg-rohstoffe GmbH
+GEOJET Luftfahrzeuge Management GmbH
+TITUS Research GmbH
+AEROKING Luftfahrzeuge Beteiligungs GmbH & Co. Seminar KG
+AEROKING Luftfahrzeuge Beteiligungs GmbH & Co. JET CLUB KG
+Lumos Drohnen GmbH
+AuG Kiel Drohnen GmbH
+Drohnen Expertise Solutions GmbH
+Deutsche Drohnen Inspektion GmbH
+Viebrock Drohnen & Technik GmbH
+Drohnen-Service Wilhelmshaven GmbH
+Dumberger Photovoltaik GmbH
+Hanse Photovoltaik GmbH
+Dachland Photovoltaik GmbH
+Viethen Photovoltaik GmbH
+WIESER Photovoltaik GmbH
+Sela Photovoltaik GmbH
+Photovoltaik Büsgen GmbH
+Photovoltaik Werkstatt GmbH
+Photovoltaik Büsgen GmbH
+Photovoltaik Werkstatt GmbH
+SüdEnergie Photovoltaik GmbH
+Rohrer Photovoltaik GmbH
+Diether Photovoltaik GmbH
+Photovoltaik GM GmbH
+Nordsee Photovoltaik GmbH
+Seisenberger Photovoltaik GmbH
+Windenergie Gengenbach GmbH
+Windenergie Bremerberg GmbH
+Windenergie Bardau GmbH
+Windenergie Burgsalach GmbH
+Windenergie Lustholz GmbH
+Windenergie Briesensee GmbH
+Rübsamen Windenergie GmbH
+Batteriespeicher Menden GmbH
+Batteriespeicher Tengen GmbH
+neu-watt Batteriespeicher GmbH
+Batteriespeicher Löhndorf Verwaltungs-GmbH
+Batteriespeicher Schwerin Verwaltungs GmbH
+Batteriespeicher Con 1 GmbH
+PhotoVolta Batteriespeicher Aldersbach GmbH
+LE Batteriespeicher Alzey GmbH
+Schoenergie Batteriespeicher Föhren GmbH
+LE Batteriespeicher Loeffingen GmbH
+Werdohl Batteriespeicher I GmbH
+Energieglück Batteriespeicher GK GmbH
+LE Batteriespeicher Busdorf GmbH
+Batteriespeicher Kleibrok 1 GmbH
+Batteriespeicher Halenbach 002 GmbH
+Batteriespeicher Zwönitz Verwaltungs GmbH
+LE Batteriespeicher Arnstadt GmbH
+DH2 Deutsche Wasserstoff GmbH
+Deutsche ReGas Wasserstoff GmbH
+Wasserstoff - Netz Burgenlandkreis GmbH
+DWT Deutsche Wasserstoff Technologie GmbH
+DWT Deutsche Wasserstoff Technologie GmbH
+Wasserstoff Lichtenau GmbH & Co. KG
+Wasserstoff Entwicklungs GmbH & Co. KG
+Energiepark Lausitz Wasserstoff GmbH & Co. KG
+ENERTRAG Wasserstoff Verbund I GmbH & Co. KG
+ABO Wind Wasserstoff Michelsrombach GmbH & Co. KG
+Climagy Stromspeicher GmbH & Co. KG
+Geothermie Karlsfeld GmbH
+Geothermie Rupertiwinkel GmbH
+Erdwerk GmbH hydrogeologie geothermie
+Geothermie Unterhaching Beteiligungs-GmbH
+HAMBURG ENERGIE Geothermie GmbH
+KGC Geothermie Consulting GmbH
+Systec Energiemanagement GmbH
+WoWi Energiemanagement GmbH
+frajo Energiemanagement GmbH
+HR Energiemanagement GmbH
+Atum Energiemanagement GmbH
+SYNTAS Energiemanagement GmbH
+Ergon Energiemanagement GmbH
+Inova Energiemanagement GmbH
+CO2 design GmbH
+CO2 Express GmbH
+com et con Soziale Dienste GmbH
+exit CO2 GmbH
+CO2-EnerTec GmbH
+you.co2unt.org gGmbH
+CO2 Konzept GmbH
+e-cargo Gesellschaft für kommunale Elektromobilität UG (haftungsbeschränkt)
+Charge & More Entwicklungs- und Servicegesellschaft für Elektromobilität UG (haftungsbeschränkt)
+Lausitzer Zentrum für Elektromobilität UG (haftungsbeschränkt)
+ASSINCOR GmbH
+EMH Elektromobilität-UG (haftungsbeschränkt)
+WLW Industrieautomation GmbH
+Höger Industrieautomation GmbH
+IBIS Industrieautomation Verwaltungs-GmbH
+Europlan Systemtechnik Industrieautomation GmbH
+I.A.S. Industrieautomation Spicks GmbH
+Kührer Papst Industrieautomation GmbH
+Greinert & Glatt GmbH Industrieautomation
+Kührer Papst Industrieautomation GmbH
+Greinert & Glatt GmbH Industrieautomation
+R & W Industrieautomation GmbH
+MeiTec Anlagenbau &. Industrieautomation GmbH
+SysTec Systemtechnik und Industrieautomation GmbH
+INDUS Industrial Solutions GmbH Industrieautomation
+IBIS Industrieautomation GmbH & Co. KG
+AMFLEX Elektronik und Industrieautomation GmbH
+Wied GmbH & Co. KG Industrieautomation
+Weber Agrar Robotik GmbH
+ETU Automation & Robotik GmbH
+FLEXIVA automation & Robotik GmbH
+JAC Automation & Robotik GmbH
+R & D Robotik GmbH
+AROTEC Automation und Robotik GmbH
+RCB Robotik Clubs UG (haftungsbeschränkt)
+Kurlbaum Robotik und IT UG (haftungsbeschränkt)
+Tepea Automatisierungstechnik Robotik GmbH & Co. KG
+SL-Robotik UG (haftungsbeschränkt)
+BUNK UG (haftungsbeschränkt) - Akademie für Chirurgisches Training und Robotik
+B & M building + maintenance GmbH
+prodactive GmbH
+FT Maintenance GmbH
+SN Maintenance GmbH
+HLB Maintenance GmbH
+ATR-Maintenance GmbH
+Vartan Germany GmbH
+Preductive Beteiligungs GmbH
+Duscher Maintenance GmbH
+PreActive GmbH
+DPO-Services GmbH Servicegesellschaft für Digitalisierung und Prozessoptimierung
+BAV Workflow GmbH - Beratung & Prozessoptimierung für Betriebliche Altersvorsorge
+KoCon GmbH Consulting für IT Projektmanagement, Prozessoptimierung und Personalsysteme
+Institut für Prozeßoptimierung und Informationstechnologien GmbH
+PPO GmbH Gesellschaft für Prozeßoptimierung, Personalentwicklung und Organisationsentwicklung
+Taktik Prozessoptimierung GmbH
+A.V.E. Paderborner Abfallverwertungs- und Energie GmbH
+L & H Tarnow Verwaltungs GmbH
+Landwirtschaft & Handel Tarnow GmbH & Co. KG
+Kreislaufwirtschaft Maurer Transporte GmbH
+junge Kreislaufwirtschaft UG (haftungsbeschränkt)
+Dr. Enk Kreislaufwirtschaft GmbH
+KWT - Kreislaufwirtschaft Tannroda GmbH
+HIV Halbleiter- Import und - Vertriebs GmbH
+Smartest GmbH Entwicklung von Applikationen für Halbleiter-Testsysteme
+Niptron Halbleiter GmbH
+MCE Halbleiter GmbH
+Meyer-Hartwig Halbleiter GmbH
+Freescale Halbleiter Deutschland GmbH
+N.A.S. - Elektronische Halbleiter GmbH
+Grickscheit Gebäudeautomation GmbH
+attain Gebäudeautomation GmbH
+Boos Gebäudeautomation GmbH
+Buswerk Gebäudeautomation GmbH
+Werner Gebäudeautomation GmbH
+Stöckl GmbH für Gebäudeautomation
+Wolfertz GmbH Gebäudeautomation
+AKB Gebäudeautomation GmbH
+Becker Gebäudeautomation GmbH
+Straatman Building Smart Connections GmbH
+Quipped GmbH
+4-D Technologies Capital GmbH
+Faradea Investment Holding GmbH
+RETIC GmbH
+VITINICA HAUS GmbH & Co. Bautechnologie KG
+Schmidt Bautechnologie Chemie- u. Spezialbaustoffe Vertriebs GmbH
+Diagnoblue Biotechnologie GmbH
+TIB Biotechnologie Verwaltungs GmbH
+BTN Biotechnologie Nordhausen GmbH
+BioS Biotechnologie Schönow GmbH
+Diagnoblue Biotechnologie GmbH
+TIB Biotechnologie Verwaltungs GmbH
+BTN Biotechnologie Nordhausen GmbH
+BioS Biotechnologie Schönow GmbH
+biocyc Biotechnologie Verwaltungs GmbH
+HA2 Medizintechnik GmbH
+medika Medizintechnik GmbH
+ResMed Medizintechnik GmbH
+Geister Medizintechnik GmbH
+AFS Medizintechnik GmbH
+Jochum Medizintechnik GmbH
+Jochum Medizintechnik GmbH
+SIGNUS Medizintechnik GmbH
+Bursch Medizintechnik GmbH
+Bionic Medizintechnik GmbH
+NRI Medizintechnik GmbH
+WKM Medizintechnik GmbH
+HMT Medizintechnik GmbH
+KRI Medizintechnik GmbH
+Schiller Medizintechnik GmbH
+NIRx Medizintechnik GmbH
+CKK Diagnostik GmbH
+WAfM Diagnostik GmbH
+Medi Diagnostik GmbH
+Forum Diagnostik GmbH
+MAMBA DIAGNOSTIK GmbH
+Janus Diagnostik GmbH
+Quader Diagnostik GmbH
+Genolytic Diagnostik GmbH
+SomnoEXPLORE Diagnostik GmbH
+DIKI Deutsches Innovationsinstitut für Künstliche Intelligenz GmbH
+DIIF-KI - Deutsches Institut für Künstliche Intelligenz GmbH
+Entrance Robotics GmbH
+ERP It Software + Systeme GmbH
+Systemhaus Cramer GmbH
+BSA Systemhaus GmbH
+Ziegler Systemhaus GmbH
+Computation Systemhaus GmbH
+BS2 Systemhaus GmbH
+Systemhaus Ulm GmbH
+LOTAS Softwareentwicklung GmbH
+ASL Softwareentwicklung GmbH
+Ergosoft Softwareentwicklung GmbH
+Systemwerft Softwareentwicklung GmbH
+itdesign Softwareentwicklung GmbH
+Thiele Softwareentwicklung GmbH
+Fibudata Softwareentwicklung GmbH
+Setmics Softwareentwicklung GmbH
+STANDARDLOHN Softwareentwicklung GmbH
+Softwareentwicklung Bendixen GmbH
+Rumler Softwareentwicklung GmbH
+WK Softwareentwicklung GmbH
+JMP Softwareentwicklung GmbH
+AbaDev Softwareentwicklung GmbH
+IVU Softwareentwicklung GmbH
+HG IT-Dienstleistungen GmbH
+JARVIS IT-Dienstleistungen GmbH
+Berger IT-Dienstleistungen GmbH
+IT-Dienstleistungen Schleher GmbH
+MB Wasseraufbereitung GmbH
+Böckenholt Wasseraufbereitung GmbH
+Herberger Wasseraufbereitung GmbH
+Aquatime Wasseraufbereitung GmbH
+von Hebel Wasseraufbereitung GmbH
+Peter Schley, Wasseraufbereitung GmbH
+dp Wasseraufbereitung Poschen GmbH
+Dr. Wolfgang Reif Gefahrstoff-, Gefahrgut- und Abfallmanagement GmbH
+FES Abfallmanagement- und Service GmbH
+NE Facility Services GmbH
+T.E.R. - Technologie für Entsorgung und Recycling Geschäftsführungs-GmbH
+T.E.R. - Technologie für Entsorgung und Recycling GmbH & Co KG
+Mutabor Technologies GmbH (Gesellschaft für Management, Umwelt, Technologie, Aviation, Beratung, Organisation und Realisation)
+S.D.S.D. GmbH - Scan und Drohnen Service Deutschland GmbH
+BOS Drohnen UG (haftungsbeschränkt)
+Drohnen Service Pro GmbH
+DFI Drohnen für Inspektionen UG (haftungsbeschränkt)
+D.A.S. Drohnen Autonomie Services UG (haftungsbeschränkt)
