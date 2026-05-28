@@ -4,14 +4,13 @@ Shadow Enrichment Worker — BA-Bridge
 Füllt shadow_companies proaktiv mit Bundesanzeiger-Daten für deutsche private Companies.
 
 Zwei Jobs (via APScheduler in main.py):
-  1. seed_shadow_queue()    — täglich 03:30 UTC: neue DE GmbH-Companies aus Wikidata
+  1. seed_shadow_queue()    — täglich 03:30 UTC: neue DE GmbH-Companies aus seed_data/de_gmbh_curated.txt
   2. enrich_one_shadow()    — alle 2.5h: 1 pending Company via BA anreichern (≈10/Tag)
 
 Seed-Quelle:
-  Wikidata SPARQL → DE Companies mit Rechtsform GmbH / GmbH & Co. KG.
+  seed_data/de_gmbh_curated.txt — generiert via seed_handelsregister.py (handelsregister.ai API).
+  Taxonomy-aligned, aktive GmbHs, dedupliziert. Einmalig lokal generiert + ins Repo committed.
   Filtert: bereits in Supabase + bereits in shadow_companies.
-  Kein API-Key nötig. 1 Request pro Seed-Run.
-  Zweck: Companies die der User noch NIE gesucht hat — proaktiver Pre-fetch.
 
 Prio-Score via Wikipedia Pageviews API (DE):
   ≥50k views/Monat  → 100  (Würth, Aldi, Bosch etc.)
@@ -25,9 +24,9 @@ Rate-Limiting:
 """
 import logging
 import os
-import re
 import time
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 
 import httpx
 from sqlalchemy.orm import Session
@@ -45,165 +44,8 @@ _WIKI_PAGEVIEWS_URL = (
 )
 _WIKI_HEADERS = {"User-Agent": "ArgoAnalytics/1.0 (info@argo-analytics.io)"}
 
-# ── Wikipedia Kategorie-Seed ─────────────────────────────────────────────────
-# Ersetzt Wikidata SPARQL + OpenCorporates.
-# Quelle: DE Wikipedia Unternehmenskategorien → taxonomy-aligned + PE-Software-Expansion.
-# Vorteile: kein API-Key, kein Storage, kein Rate-Limit-Problem, hohe Datenqualität.
-
-_WIKI_API_URL = "https://de.wikipedia.org/w/api.php"
-
-# (Kategoriename, gmbh_only)
-# gmbh_only=True  → nur Artikel mit "GmbH" oder "GmbH & Co" im Titel
-# gmbh_only=False → alle Artikel (für Softwaresektor: breiter, PE-relevant)
-_WIKI_CATEGORIES: list[tuple[str, bool]] = [
-    # ── Carbon & Climate ──────────────────────────────────────────────────
-    ("Solarunternehmen_(Deutschland)",                   True),
-    ("Windkraftunternehmen_(Deutschland)",               True),
-    ("Energieunternehmen_(Deutschland)",                 True),
-    # ── Industrial Tech ───────────────────────────────────────────────────
-    ("Maschinenbauunternehmen_(Deutschland)",            True),
-    ("Elektronikunternehmen_(Deutschland)",              True),
-    ("Automobilindustrie_(Deutschland)",                 True),
-    # ── Life Sciences ─────────────────────────────────────────────────────
-    ("Biotechnologieunternehmen_(Deutschland)",          True),
-    ("Medizintechnikunternehmen_(Deutschland)",          True),
-    ("Pharmaunternehmen_(Deutschland)",                  True),
-    ("Chemieunternehmen_(Deutschland)",                  True),
-    # ── Software / IT — PE-relevant, bewusst breiter ──────────────────────
-    # Ziel: ältere DE Softwareunternehmen (ERP, Systemhäuser, Nische) als PE-Target
-    ("Softwareunternehmen_(Deutschland)",                False),
-    ("Informationstechnologieunternehmen_(Deutschland)", False),
-]
-
-# Signalwörter für PE-relevante Altsoftware im Unternehmensnamen.
-# Companies mit diesen Begriffen werden auch ohne GmbH-Filter im Namen aufgenommen —
-# viele Systemhäuser und ERP-Anbieter heißen z.B. "ABC Datentechnik GmbH".
-_PE_SOFTWARE_SIGNALS: frozenset[str] = frozenset({
-    "software", "systeme", "systemhaus", "datentechnik", "datenverarbeitung",
-    "edv", "informationstechnik", "informationssysteme", "it-systeme",
-    "softwareentwicklung", "anwendungsentwicklung", "betriebssoftware",
-    "warenwirtschaft", "erp", "crm",
-})
-
-_GMBH_SIGNALS: frozenset[str] = frozenset({"gmbh", "gmbh & co"})
-
-
-def _is_gmbh_name(name: str) -> bool:
-    """True wenn Name auf GmbH oder GmbH & Co. KG hindeutet."""
-    lower = name.lower()
-    return any(sig in lower for sig in _GMBH_SIGNALS)
-
-
-def _is_pe_software_candidate(name: str) -> bool:
-    """True wenn Name PE-relevante Softwaresignale enthält."""
-    lower = name.lower()
-    return any(sig in lower for sig in _PE_SOFTWARE_SIGNALS)
-
-
-def _fetch_wikipedia_category_companies(
-    category: str,
-    gmbh_only: bool = True,
-    limit: int = 500,
-) -> list[str]:
-    """
-    Holt Unternehmensnamen aus einer DE-Wikipedia-Kategorie via MediaWiki API.
-
-    Filtert:
-      - gmbh_only=True: nur Artikel mit GmbH/GmbH & Co im Titel
-      - gmbh_only=False: alle + PE-Software-Signal-Filter als Erweiterung
-      - Unterkategorien (ns != 0) werden übersprungen
-      - Duplikate (case-insensitiv) werden dedupliziert
-
-    Rate-Limit: 1 Request pro Seite, 0.3s Sleep — Wikimedia-konform.
-    """
-    headers = {
-        "User-Agent": "ArgoAnalytics/1.0 (info@argo-analytics.io)",
-        "Accept":     "application/json",
-    }
-    seen:   set[str]  = set()
-    result: list[str] = []
-    cmcontinue: str | None = None
-
-    with httpx.Client(timeout=20, headers=headers) as client:
-        while len(result) < limit:
-            params: dict = {
-                "action":  "query",
-                "list":    "categorymembers",
-                "cmtitle": f"Kategorie:{category}",
-                "cmlimit": 500,
-                "cmnamespace": 0,   # nur Artikel, keine Unterkategorien
-                "format":  "json",
-            }
-            if cmcontinue:
-                params["cmcontinue"] = cmcontinue
-
-            try:
-                resp = client.get(_WIKI_API_URL, params=params)
-            except Exception as e:
-                logger.warning("_fetch_wikipedia_category_companies '%s' failed: %s", category, e)
-                break
-
-            if resp.status_code == 429:
-                logger.warning("_fetch_wikipedia_category_companies '%s': 429 — abgebrochen", category)
-                break
-            if resp.status_code != 200:
-                logger.warning(
-                    "_fetch_wikipedia_category_companies '%s': HTTP %s", category, resp.status_code
-                )
-                break
-
-            data = resp.json()
-            members = data.get("query", {}).get("categorymembers", [])
-
-            for member in members:
-                name = member.get("title", "").strip()
-                if not name or name.lower() in seen:
-                    continue
-
-                # GmbH-Filter
-                if gmbh_only and not _is_gmbh_name(name):
-                    # Ausnahme: PE-Software-Signal → trotzdem aufnehmen
-                    if not _is_pe_software_candidate(name):
-                        continue
-
-                seen.add(name.lower())
-                result.append(name)
-
-            # Pagination
-            cmcontinue = data.get("continue", {}).get("cmcontinue")
-            if not cmcontinue or not members:
-                break
-
-            time.sleep(0.3)   # Wikimedia Rate-Limit
-
-    logger.info(
-        "_fetch_wikipedia_category_companies: Kategorie '%s' → %d Companies (gmbh_only=%s)",
-        category, len(result), gmbh_only,
-    )
-    return result[:limit]
-
-
-def _fetch_all_wiki_category_companies() -> list[str]:
-    """
-    Iteriert alle _WIKI_CATEGORIES und sammelt deduplizierte Unternehmensnamen.
-    Reihenfolge: Taxonomy-Kategorien zuerst, PE-Software zuletzt (breiter).
-    """
-    seen:   set[str]  = set()
-    result: list[str] = []
-
-    for category, gmbh_only in _WIKI_CATEGORIES:
-        names = _fetch_wikipedia_category_companies(category, gmbh_only=gmbh_only)
-        for name in names:
-            if name.lower() not in seen:
-                seen.add(name.lower())
-                result.append(name)
-        time.sleep(1.0)   # zwischen Kategorien: Wikimedia schonen
-
-    logger.info(
-        "_fetch_all_wiki_category_companies: %d Companies aus %d Kategorien",
-        len(result), len(_WIKI_CATEGORIES),
-    )
-    return result
+# Pfad zur kuratierten GmbH-Liste (generiert via seed_handelsregister.py)
+_SEED_FILE = Path(__file__).parent.parent / "seed_data" / "de_gmbh_curated.txt"
 
 
 
@@ -300,9 +142,9 @@ def seed_shadow_queue(db: Session) -> int:
     """
     Befüllt Shadow-Queue mit deutschen GmbH-Companies die noch NICHT in Supabase sind.
 
-    Quelle:  Wikipedia DE Unternehmenskategorien — taxonomy-aligned + PE-Software-Expansion.
-             Kategorien: Climate, Industrial, Life Sciences, Software/IT.
-             PE-Software: breiter Scope (ohne GmbH-Pflicht) für ältere DE Softwareunternehmen.
+    Quelle:  seed_data/de_gmbh_curated.txt — generiert via seed_handelsregister.py.
+             Taxonomy-aligned (14 Sektoren), aktive GmbHs, dedupliziert.
+             Datei einmalig lokal generieren + ins Repo committen. Kein Cron nötig.
 
     Filter:  Bereits in Supabase → überspringen (Rolling Refresh reicht)
              Bereits in shadow_companies → überspringen
@@ -310,12 +152,20 @@ def seed_shadow_queue(db: Session) -> int:
 
     Täglich 03:30 UTC + beim Startup wenn Queue < 10.
     """
-    # Alle Wikipedia-Kategorien durchlaufen (taxonomy-aligned + PE-Software)
-    combined = _fetch_all_wiki_category_companies()
-    logger.info("seed_shadow_queue: Wikipedia-Kategorien → %d Companies", len(combined))
+    if not _SEED_FILE.exists():
+        logger.warning(
+            "seed_shadow_queue: Seed-Datei nicht gefunden: %s — "
+            "seed_handelsregister.py lokal ausführen und Ergebnis committen.",
+            _SEED_FILE,
+        )
+        return 0
+
+    raw = _SEED_FILE.read_text(encoding="utf-8").splitlines()
+    combined = [line.strip() for line in raw if line.strip()]
+    logger.info("seed_shadow_queue: Seed-Datei → %d Companies", len(combined))
 
     if not combined:
-        logger.warning("seed_shadow_queue: keine Companies aus Wikipedia-Kategorien — Seed abgebrochen")
+        logger.warning("seed_shadow_queue: Seed-Datei leer — Seed abgebrochen")
         return 0
 
     supabase_existing = _fetch_supabase_company_names()
@@ -331,7 +181,7 @@ def seed_shadow_queue(db: Session) -> int:
     ]
 
     logger.info(
-        "seed_shadow_queue: %d kombiniert → %d neu "
+        "seed_shadow_queue: %d in Datei → %d neu "
         "(Supabase: %d, Shadow: %d bereits vorhanden)",
         len(combined), len(new_names),
         len(supabase_existing), len(shadow_existing),
