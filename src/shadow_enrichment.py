@@ -45,164 +45,166 @@ _WIKI_PAGEVIEWS_URL = (
 )
 _WIKI_HEADERS = {"User-Agent": "ArgoAnalytics/1.0 (info@argo-analytics.io)"}
 
-# Wikidata SPARQL — DE GmbH-Companies
-_WIKIDATA_URL   = "https://query.wikidata.org/sparql"
-_WIKIDATA_QUERY = """
-SELECT DISTINCT ?companyLabel WHERE {
-  VALUES ?legalForm { wd:Q460377 wd:Q1915791 }
-  ?company wdt:P1454 ?legalForm ;
-           wdt:P17   wd:Q183 .
-  ?company wdt:P1375 [] .
-  FILTER NOT EXISTS { ?company wdt:P576 [] }
-  FILTER NOT EXISTS { ?company wdt:P31 wd:Q13406463 }
-  ?company rdfs:label ?companyLabel .
-  FILTER(LANG(?companyLabel) = "de")
-}
-ORDER BY ?companyLabel
-LIMIT 2000
-"""
+# ── Wikipedia Kategorie-Seed ─────────────────────────────────────────────────
+# Ersetzt Wikidata SPARQL + OpenCorporates.
+# Quelle: DE Wikipedia Unternehmenskategorien → taxonomy-aligned + PE-Software-Expansion.
+# Vorteile: kein API-Key, kein Storage, kein Rate-Limit-Problem, hohe Datenqualität.
 
-# OpenCorporates — DE GmbH aktiv, kostenlose API (kein Key nötig)
-_OPENCORP_URL = "https://api.opencorporates.com/v0.4/companies/search"
-_OPENCORP_PARAMS_BASE = {
-    "jurisdiction_code": "de",
-    "company_type":      "Gesellschaft mit beschraenkter Haftung",
-    "current_status":    "Active",
-    "per_page":          100,
-}
+_WIKI_API_URL = "https://de.wikipedia.org/w/api.php"
+
+# (Kategoriename, gmbh_only)
+# gmbh_only=True  → nur Artikel mit "GmbH" oder "GmbH & Co" im Titel
+# gmbh_only=False → alle Artikel (für Softwaresektor: breiter, PE-relevant)
+_WIKI_CATEGORIES: list[tuple[str, bool]] = [
+    # ── Carbon & Climate ──────────────────────────────────────────────────
+    ("Solarunternehmen_(Deutschland)",                   True),
+    ("Windkraftunternehmen_(Deutschland)",               True),
+    ("Energieunternehmen_(Deutschland)",                 True),
+    # ── Industrial Tech ───────────────────────────────────────────────────
+    ("Maschinenbauunternehmen_(Deutschland)",            True),
+    ("Elektronikunternehmen_(Deutschland)",              True),
+    ("Automobilindustrie_(Deutschland)",                 True),
+    # ── Life Sciences ─────────────────────────────────────────────────────
+    ("Biotechnologieunternehmen_(Deutschland)",          True),
+    ("Medizintechnikunternehmen_(Deutschland)",          True),
+    ("Pharmaunternehmen_(Deutschland)",                  True),
+    ("Chemieunternehmen_(Deutschland)",                  True),
+    # ── Software / IT — PE-relevant, bewusst breiter ──────────────────────
+    # Ziel: ältere DE Softwareunternehmen (ERP, Systemhäuser, Nische) als PE-Target
+    ("Softwareunternehmen_(Deutschland)",                False),
+    ("Informationstechnologieunternehmen_(Deutschland)", False),
+]
+
+# Signalwörter für PE-relevante Altsoftware im Unternehmensnamen.
+# Companies mit diesen Begriffen werden auch ohne GmbH-Filter im Namen aufgenommen —
+# viele Systemhäuser und ERP-Anbieter heißen z.B. "ABC Datentechnik GmbH".
+_PE_SOFTWARE_SIGNALS: frozenset[str] = frozenset({
+    "software", "systeme", "systemhaus", "datentechnik", "datenverarbeitung",
+    "edv", "informationstechnik", "informationssysteme", "it-systeme",
+    "softwareentwicklung", "anwendungsentwicklung", "betriebssoftware",
+    "warenwirtschaft", "erp", "crm",
+})
+
+_GMBH_SIGNALS: frozenset[str] = frozenset({"gmbh", "gmbh & co"})
 
 
-# ── Wikidata SPARQL Abruf ─────────────────────────────────────────────────────
+def _is_gmbh_name(name: str) -> bool:
+    """True wenn Name auf GmbH oder GmbH & Co. KG hindeutet."""
+    lower = name.lower()
+    return any(sig in lower for sig in _GMBH_SIGNALS)
 
-def _fetch_wikidata_de_gmbh_companies(limit: int = 500) -> list[str]:
+
+def _is_pe_software_candidate(name: str) -> bool:
+    """True wenn Name PE-relevante Softwaresignale enthält."""
+    lower = name.lower()
+    return any(sig in lower for sig in _PE_SOFTWARE_SIGNALS)
+
+
+def _fetch_wikipedia_category_companies(
+    category: str,
+    gmbh_only: bool = True,
+    limit: int = 500,
+) -> list[str]:
     """
-    Holt DE-GmbH-Unternehmen aus Wikidata via SPARQL.
+    Holt Unternehmensnamen aus einer DE-Wikipedia-Kategorie via MediaWiki API.
 
-    Rechtsform: GmbH (Q460377) + GmbH & Co. KG (Q1915791)
-    Land:       Deutschland (Q183)
-    Filter:     aufgelöste Companies (P576) werden ausgeschlossen
-    Kein API-Key nötig. 1 HTTP-Request pro Seed-Run.
+    Filtert:
+      - gmbh_only=True: nur Artikel mit GmbH/GmbH & Co im Titel
+      - gmbh_only=False: alle + PE-Software-Signal-Filter als Erweiterung
+      - Unterkategorien (ns != 0) werden übersprungen
+      - Duplikate (case-insensitiv) werden dedupliziert
+
+    Rate-Limit: 1 Request pro Seite, 0.3s Sleep — Wikimedia-konform.
     """
     headers = {
         "User-Agent": "ArgoAnalytics/1.0 (info@argo-analytics.io)",
-        "Accept":     "application/sparql-results+json",
+        "Accept":     "application/json",
     }
-    params  = {"query": _WIKIDATA_QUERY, "format": "json"}
-    backoff = [65, 120, 300]   # 429: 65s → 120s → 300s
-
-    for attempt, wait in enumerate([0] + backoff):
-        if wait:
-            logger.info(
-                "_fetch_wikidata_de_gmbh_companies: 429 — warte %ds (Attempt %d/%d)",
-                wait, attempt, len(backoff) + 1,
-            )
-            time.sleep(wait)
-        try:
-            with httpx.Client(timeout=60, headers=headers) as client:
-                resp = client.get(_WIKIDATA_URL, params=params)
-
-            if resp.status_code == 429:
-                if attempt < len(backoff):
-                    continue   # nächster Backoff-Schritt
-                logger.warning(
-                    "_fetch_wikidata_de_gmbh_companies: 429 nach %d Versuchen — abgebrochen",
-                    len(backoff) + 1,
-                )
-                return []
-
-            if resp.status_code != 200:
-                logger.warning(
-                    "_fetch_wikidata_de_gmbh_companies HTTP %s", resp.status_code
-                )
-                return []
-
-            bindings = resp.json().get("results", {}).get("bindings", [])
-            seen:   set[str]  = set()
-            unique: list[str] = []
-            for b in bindings:
-                label = (b.get("companyLabel") or {}).get("value", "").strip()
-                if label and label.lower() not in seen:
-                    seen.add(label.lower())
-                    unique.append(label)
-
-            logger.info(
-                "_fetch_wikidata_de_gmbh_companies: %d eindeutige GmbH-Companies "
-                "aus Wikidata", len(unique),
-            )
-            return unique[:limit]
-
-        except Exception as e:
-            logger.warning("_fetch_wikidata_de_gmbh_companies failed: %s", e)
-            return []
-
-    return []
-
-
-
-# ── OpenCorporates Abruf ──────────────────────────────────────────────────────
-
-def _fetch_opencorporates_de_gmbh_companies(pages: int = 5) -> list[str]:
-    """
-    Holt aktive DE GmbH-Companies aus OpenCorporates (kostenlose API, kein Key).
-    pages x 100 Companies pro Aufruf — default 5 Seiten = 500 Companies.
-    Dedupliziert. Bei Rate-Limit (429) oder Fehler: leere Liste.
-    """
-    headers = {"User-Agent": "ArgoAnalytics/1.0 (info@argo-analytics.io)"}
     seen:   set[str]  = set()
     result: list[str] = []
+    cmcontinue: str | None = None
 
-    with httpx.Client(timeout=15, headers=headers) as client:
-        for page in range(1, pages + 1):
+    with httpx.Client(timeout=20, headers=headers) as client:
+        while len(result) < limit:
+            params: dict = {
+                "action":  "query",
+                "list":    "categorymembers",
+                "cmtitle": f"Kategorie:{category}",
+                "cmlimit": 500,
+                "cmnamespace": 0,   # nur Artikel, keine Unterkategorien
+                "format":  "json",
+            }
+            if cmcontinue:
+                params["cmcontinue"] = cmcontinue
+
             try:
-                params = {**_OPENCORP_PARAMS_BASE, "page": page}
-                resp   = client.get(_OPENCORP_URL, params=params)
-
-                if resp.status_code == 429:
-                    logger.warning(
-                        "_fetch_opencorporates_de_gmbh_companies: 429 auf Seite %d — abgebrochen",
-                        page,
-                    )
-                    break
-
-                if resp.status_code != 200:
-                    logger.warning(
-                        "_fetch_opencorporates_de_gmbh_companies HTTP %s auf Seite %d",
-                        resp.status_code, page,
-                    )
-                    break
-
-                companies = (
-                    resp.json()
-                    .get("results", {})
-                    .get("companies", [])
-                )
-                if not companies:
-                    break
-
-                for item in companies:
-                    name = (
-                        (item.get("company") or {})
-                        .get("name", "")
-                        .strip()
-                    )
-                    if name and name.lower() not in seen:
-                        seen.add(name.lower())
-                        result.append(name)
-
-                time.sleep(0.5)   # OpenCorporates Rate-Limit
-
+                resp = client.get(_WIKI_API_URL, params=params)
             except Exception as e:
+                logger.warning("_fetch_wikipedia_category_companies '%s' failed: %s", category, e)
+                break
+
+            if resp.status_code == 429:
+                logger.warning("_fetch_wikipedia_category_companies '%s': 429 — abgebrochen", category)
+                break
+            if resp.status_code != 200:
                 logger.warning(
-                    "_fetch_opencorporates_de_gmbh_companies failed (Seite %d): %s",
-                    page, e,
+                    "_fetch_wikipedia_category_companies '%s': HTTP %s", category, resp.status_code
                 )
                 break
 
+            data = resp.json()
+            members = data.get("query", {}).get("categorymembers", [])
+
+            for member in members:
+                name = member.get("title", "").strip()
+                if not name or name.lower() in seen:
+                    continue
+
+                # GmbH-Filter
+                if gmbh_only and not _is_gmbh_name(name):
+                    # Ausnahme: PE-Software-Signal → trotzdem aufnehmen
+                    if not _is_pe_software_candidate(name):
+                        continue
+
+                seen.add(name.lower())
+                result.append(name)
+
+            # Pagination
+            cmcontinue = data.get("continue", {}).get("cmcontinue")
+            if not cmcontinue or not members:
+                break
+
+            time.sleep(0.3)   # Wikimedia Rate-Limit
+
     logger.info(
-        "_fetch_opencorporates_de_gmbh_companies: %d Companies abgerufen",
-        len(result),
+        "_fetch_wikipedia_category_companies: Kategorie '%s' → %d Companies (gmbh_only=%s)",
+        category, len(result), gmbh_only,
+    )
+    return result[:limit]
+
+
+def _fetch_all_wiki_category_companies() -> list[str]:
+    """
+    Iteriert alle _WIKI_CATEGORIES und sammelt deduplizierte Unternehmensnamen.
+    Reihenfolge: Taxonomy-Kategorien zuerst, PE-Software zuletzt (breiter).
+    """
+    seen:   set[str]  = set()
+    result: list[str] = []
+
+    for category, gmbh_only in _WIKI_CATEGORIES:
+        names = _fetch_wikipedia_category_companies(category, gmbh_only=gmbh_only)
+        for name in names:
+            if name.lower() not in seen:
+                seen.add(name.lower())
+                result.append(name)
+        time.sleep(1.0)   # zwischen Kategorien: Wikimedia schonen
+
+    logger.info(
+        "_fetch_all_wiki_category_companies: %d Companies aus %d Kategorien",
+        len(result), len(_WIKI_CATEGORIES),
     )
     return result
+
 
 
 # ── Supabase-Abruf (Ausschluss-Filter) ───────────────────────────────────────
@@ -298,11 +300,9 @@ def seed_shadow_queue(db: Session) -> int:
     """
     Befüllt Shadow-Queue mit deutschen GmbH-Companies die noch NICHT in Supabase sind.
 
-    Quellen:
-      1. Wikidata SPARQL — DE GmbH + GmbH & Co. KG (geschärft: HR-Nummer-Filter,
-         Listen-Artikel-Ausschluss)
-      2. OpenCorporates — aktive DE GmbHs (kostenlose API, 5 Seiten = 500 Companies)
-    Beide Quellen werden zusammengeführt und dedupliziert.
+    Quelle:  Wikipedia DE Unternehmenskategorien — taxonomy-aligned + PE-Software-Expansion.
+             Kategorien: Climate, Industrial, Life Sciences, Software/IT.
+             PE-Software: breiter Scope (ohne GmbH-Pflicht) für ältere DE Softwareunternehmen.
 
     Filter:  Bereits in Supabase → überspringen (Rolling Refresh reicht)
              Bereits in shadow_companies → überspringen
@@ -310,24 +310,12 @@ def seed_shadow_queue(db: Session) -> int:
 
     Täglich 03:30 UTC + beim Startup wenn Queue < 10.
     """
-    # Quelle 1: Wikidata (geschärfter Query mit HR-Nummer-Filter)
-    wikidata_names = _fetch_wikidata_de_gmbh_companies(limit=500)
-    logger.info("seed_shadow_queue: Wikidata → %d Companies", len(wikidata_names))
-
-    # Quelle 2: OpenCorporates (aktive DE GmbHs)
-    opencorp_names = _fetch_opencorporates_de_gmbh_companies(pages=5)
-    logger.info("seed_shadow_queue: OpenCorporates → %d Companies", len(opencorp_names))
-
-    # Zusammenführen + deduplizieren (Wikidata hat Prio bei Namens-Konflikt)
-    seen: set[str] = set()
-    combined: list[str] = []
-    for name in wikidata_names + opencorp_names:
-        if name.lower() not in seen:
-            seen.add(name.lower())
-            combined.append(name)
+    # Alle Wikipedia-Kategorien durchlaufen (taxonomy-aligned + PE-Software)
+    combined = _fetch_all_wiki_category_companies()
+    logger.info("seed_shadow_queue: Wikipedia-Kategorien → %d Companies", len(combined))
 
     if not combined:
-        logger.warning("seed_shadow_queue: beide Quellen leer — Seed abgebrochen")
+        logger.warning("seed_shadow_queue: keine Companies aus Wikipedia-Kategorien — Seed abgebrochen")
         return 0
 
     supabase_existing = _fetch_supabase_company_names()
@@ -343,9 +331,9 @@ def seed_shadow_queue(db: Session) -> int:
     ]
 
     logger.info(
-        "seed_shadow_queue: %d kombiniert (WD=%d OC=%d) → %d neu "
+        "seed_shadow_queue: %d kombiniert → %d neu "
         "(Supabase: %d, Shadow: %d bereits vorhanden)",
-        len(combined), len(wikidata_names), len(opencorp_names), len(new_names),
+        len(combined), len(new_names),
         len(supabase_existing), len(shadow_existing),
     )
 
