@@ -12,11 +12,8 @@ Seed-Quelle:
   Taxonomy-aligned, aktive GmbHs, dedupliziert. Einmalig lokal generiert + ins Repo committed.
   Filtert: bereits in Supabase + bereits in shadow_companies.
 
-Prio-Score via Wikipedia Pageviews API (DE):
-  ≥50k views/Monat  → 100  (Würth, Aldi, Bosch etc.)
-  ≥10k              → 70
-  ≥1k               → 40
-  <1k / kein Artikel → 10  (FIFO)
+Prio-Score:
+  Fix 10.0 für alle GmbHs — FIFO-Reihenfolge aus der Seed-Datei reicht aus.
 
 Rate-Limiting:
   Max 1 Company alle 2.5h → kein CAPTCHA-Risiko bei BA-Scraping.
@@ -24,11 +21,9 @@ Rate-Limiting:
 """
 import logging
 import os
-import time
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from pathlib import Path
 
-import httpx
 from sqlalchemy.orm import Session
 
 from src.models_shadow import ShadowCompany
@@ -37,12 +32,6 @@ logger = logging.getLogger(__name__)
 
 # Nach MAX_RETRIES erfolglosen BA-Versuchen → status='exhausted' (nicht mehr retried)
 MAX_RETRIES = 5
-
-_WIKI_PAGEVIEWS_URL = (
-    "https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article"
-    "/de.wikipedia/all-access/all-agents/{title}/monthly/{start}/{end}"
-)
-_WIKI_HEADERS = {"User-Agent": "ArgoAnalytics/1.0 (info@argo-analytics.io)"}
 
 # Pfad zur kuratierten GmbH-Liste (generiert via seed_handelsregister.py)
 _SEED_FILE = Path(__file__).parent.parent / "seed_data" / "de_gmbh_curated.txt"
@@ -75,36 +64,6 @@ def _fetch_supabase_company_names() -> set[str]:
     except Exception as e:
         logger.warning("_fetch_supabase_company_names failed: %s", e)
         return set()
-
-
-# ── Prio-Score ────────────────────────────────────────────────────────────────
-
-def _get_prio_score(company_name: str) -> float:
-    """Wikipedia Pageviews (DE) → Prio-Score. Letzten 2 Monate."""
-    title = company_name.replace(" ", "_")
-    now   = datetime.now(timezone.utc)
-    start = (now - timedelta(days=60)).strftime("%Y%m01")
-    end   = now.strftime("%Y%m01")
-    url   = _WIKI_PAGEVIEWS_URL.format(title=title, start=start, end=end)
-
-    try:
-        with httpx.Client(timeout=8) as client:
-            resp = client.get(url, headers=_WIKI_HEADERS)
-        if resp.status_code == 404:
-            return 10.0
-        if resp.status_code != 200:
-            return 10.0
-        items = resp.json().get("items", [])
-        if not items:
-            return 10.0
-        avg = sum(i.get("views", 0) for i in items) / len(items)
-        if avg >= 50_000: return 100.0
-        if avg >= 10_000: return 70.0
-        if avg >=  1_000: return 40.0
-        return 20.0
-    except Exception as e:
-        logger.debug("_get_prio_score failed für '%s': %s", company_name, e)
-        return 10.0
 
 
 # ── Startup Cleanup ───────────────────────────────────────────────────────────
@@ -148,7 +107,7 @@ def seed_shadow_queue(db: Session) -> int:
 
     Filter:  Bereits in Supabase → überspringen (Rolling Refresh reicht)
              Bereits in shadow_companies → überspringen
-    Prio:    Wikipedia DE Pageviews (Würth/Aldi zuerst, Nischenplayer hinten)
+    Prio:    Fix 10.0 — FIFO aus Seed-Datei reicht, kein Wikipedia-Overhead.
 
     Täglich 03:30 UTC + beim Startup wenn Queue < 10.
     """
@@ -174,11 +133,14 @@ def seed_shadow_queue(db: Session) -> int:
         for row in db.query(ShadowCompany.name).all()
     }
 
-    new_names = [
-        n for n in combined
-        if n.lower() not in supabase_existing
-        and n.lower() not in shadow_existing
-    ]
+    # Deduplizieren innerhalb der Datei (verhindert UniqueViolation bei doppelten Einträgen)
+    seen: set[str] = set()
+    new_names = []
+    for n in combined:
+        key = n.lower()
+        if key not in supabase_existing and key not in shadow_existing and key not in seen:
+            seen.add(key)
+            new_names.append(n)
 
     logger.info(
         "seed_shadow_queue: %d in Datei → %d neu "
@@ -189,8 +151,7 @@ def seed_shadow_queue(db: Session) -> int:
 
     added = 0
     for name in new_names:
-        prio = _get_prio_score(name)
-        time.sleep(0.1)   # Wikimedia Rate-Limit — kein Burst
+        prio = 10.0   # Wikipedia-Pageviews für DE GmbHs nicht sinnvoll — FIFO reicht
         db.add(ShadowCompany(
             name=name,
             prio_score=prio,

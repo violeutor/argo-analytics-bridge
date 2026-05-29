@@ -387,8 +387,6 @@ WIESER Photovoltaik GmbH
 Sela Photovoltaik GmbH
 Photovoltaik Büsgen GmbH
 Photovoltaik Werkstatt GmbH
-Photovoltaik Büsgen GmbH
-Photovoltaik Werkstatt GmbH
 SüdEnergie Photovoltaik GmbH
 Rohrer Photovoltaik GmbH
 Diether Photovoltaik GmbH
@@ -422,7 +420,6 @@ LE Batteriespeicher Arnstadt GmbH
 DH2 Deutsche Wasserstoff GmbH
 Deutsche ReGas Wasserstoff GmbH
 Wasserstoff - Netz Burgenlandkreis GmbH
-DWT Deutsche Wasserstoff Technologie GmbH
 DWT Deutsche Wasserstoff Technologie GmbH
 Wasserstoff Lichtenau GmbH & Co. KG
 Wasserstoff Entwicklungs GmbH & Co. KG
@@ -461,8 +458,6 @@ Höger Industrieautomation GmbH
 IBIS Industrieautomation Verwaltungs-GmbH
 Europlan Systemtechnik Industrieautomation GmbH
 I.A.S. Industrieautomation Spicks GmbH
-Kührer Papst Industrieautomation GmbH
-Greinert & Glatt GmbH Industrieautomation
 Kührer Papst Industrieautomation GmbH
 Greinert & Glatt GmbH Industrieautomation
 R & W Industrieautomation GmbH
@@ -533,17 +528,12 @@ Diagnoblue Biotechnologie GmbH
 TIB Biotechnologie Verwaltungs GmbH
 BTN Biotechnologie Nordhausen GmbH
 BioS Biotechnologie Schönow GmbH
-Diagnoblue Biotechnologie GmbH
-TIB Biotechnologie Verwaltungs GmbH
-BTN Biotechnologie Nordhausen GmbH
-BioS Biotechnologie Schönow GmbH
 biocyc Biotechnologie Verwaltungs GmbH
 HA2 Medizintechnik GmbH
 medika Medizintechnik GmbH
 ResMed Medizintechnik GmbH
 Geister Medizintechnik GmbH
 AFS Medizintechnik GmbH
-Jochum Medizintechnik GmbH
 Jochum Medizintechnik GmbH
 SIGNUS Medizintechnik GmbH
 Bursch Medizintechnik GmbH
