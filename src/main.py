@@ -177,6 +177,21 @@ async def lifespan(app: FastAPI):
     except Exception as _e:
         logger.warning("Startup reset_stale_running fehlgeschlagen: %s", _e)
 
+    # ── Startup Cleanup: raw_text für geparste Reports nullen ─────────────────
+    # Gibt Speicher auf Render Postgres Basic frei — läuft bei jedem Deploy,
+    # ist idempotent (findet nach erstem Lauf nichts mehr).
+    try:
+        from src.ba_fetcher import cleanup_parsed_raw_texts
+        _db_cleanup = SessionLocal()
+        try:
+            _cleaned = cleanup_parsed_raw_texts(_db_cleanup)
+            if _cleaned:
+                logger.info("Startup raw_text Cleanup: %d Reports bereinigt", _cleaned)
+        finally:
+            _db_cleanup.close()
+    except Exception as _e:
+        logger.warning("Startup raw_text Cleanup fehlgeschlagen: %s", _e)
+
     scheduler.add_job(
         _cron_enrich_all,
         trigger="cron",
@@ -297,5 +312,27 @@ async def trigger_shadow_enrich(background_tasks: BackgroundTasks):
     """
     background_tasks.add_task(_cron_shadow_enrich)
     return {"status": "triggered", "job": "_cron_shadow_enrich"}
+
+
+@app.post("/admin/cleanup/raw-texts")
+async def trigger_raw_text_cleanup(background_tasks: BackgroundTasks):
+    """
+    Einmaliger Sofort-Cleanup: raw_text=NULL für alle geparsten Reports.
+    Gibt Speicher auf Render Postgres Basic frei.
+    Idempotent — sicher mehrfach aufrufbar.
+    """
+    def _run_cleanup():
+        from src.ba_fetcher import cleanup_parsed_raw_texts
+        db = SessionLocal()
+        try:
+            count = cleanup_parsed_raw_texts(db)
+            logger.info("/admin/cleanup/raw-texts: %d Reports bereinigt", count)
+        except Exception as e:
+            logger.error("/admin/cleanup/raw-texts failed: %s", e)
+        finally:
+            db.close()
+
+    background_tasks.add_task(_run_cleanup)
+    return {"status": "triggered", "job": "cleanup_parsed_raw_texts"}
 
 
