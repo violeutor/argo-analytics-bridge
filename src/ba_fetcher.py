@@ -117,13 +117,17 @@ def _fetch_with_backoff(ba, candidate: str) -> tuple[list | None, bool]:
     return None, False  # sollte nicht erreicht werden
 
 
-def fetch_and_store(company_name: str, db: Session) -> list[BAReport]:
+def fetch_and_store(company_name: str, db: Session) -> tuple[list[BAReport], bool, bool]:
     """
     Holt alle verfügbaren Bundesanzeiger-Berichte für company_name.
     Versucht bei 0 Treffern automatisch Fallback-Namen (AG, GmbH, etc.).
     Speichert neue Berichte in ba_reports (Duplikate werden übersprungen).
 
-    Returns: Liste der gespeicherten/vorhandenen BAReport-Objekte.
+    Returns: (stored, captcha_blocked, matched_but_empty)
+      stored            — Liste der gespeicherten/vorhandenen BAReport-Objekte
+      captcha_blocked   — True wenn CAPTCHA nach max. Retries → Shadow bleibt pending, Retry sinnvoll
+      matched_but_empty — True wenn BA die Company gefunden hat, aber 0 verwertbare Berichte
+                          (keine Publikationspflicht erfüllt) → kein Retry nötig, direkt exhausted
     """
     try:
         import deutschland.bundesanzeiger as ba_module  # type: ignore
@@ -135,17 +139,21 @@ def fetch_and_store(company_name: str, db: Session) -> list[BAReport]:
     reports_raw = None
     matched_name = company_name
     captcha_blocked = False
+    matched_but_empty = False  # BA hat Company gefunden, aber 0 verwertbare Berichte
 
     for candidate in _candidate_names(company_name):
         result, captcha_blocked = _fetch_with_backoff(ba, candidate)
         if captcha_blocked:
             # CAPTCHA persistent — alle weiteren Kandidaten überspringen
             break
-        if result:
-            reports_raw = result
-            matched_name = candidate
-            if candidate != company_name:
-                logger.info("Namens-Fallback für '%s' -> '%s'", company_name, candidate)
+        if result is not None:
+            # result kann [] (BA-Treffer, aber keine Berichte) oder [..] sein
+            matched_but_empty = len(result) == 0
+            if result:
+                reports_raw = result
+                matched_name = candidate
+                if candidate != company_name:
+                    logger.info("Namens-Fallback für '%s' -> '%s'", company_name, candidate)
             break
 
     if captcha_blocked:
@@ -154,11 +162,11 @@ def fetch_and_store(company_name: str, db: Session) -> list[BAReport]:
             "Shadow Company bleibt pending, Retry beim nächsten Cron-Run (2.5h)",
             company_name,
         )
-        return []
+        return [], True, False
 
     if not reports_raw:
         logger.info("Keine Berichte gefunden für '%s' (inkl. Fallbacks)", company_name)
-        return []
+        return [], False, matched_but_empty
 
     stored: list[BAReport] = []
 
@@ -206,9 +214,9 @@ def fetch_and_store(company_name: str, db: Session) -> list[BAReport]:
     except Exception as e:
         db.rollback()
         logger.error("fetch_and_store DB commit failed für '%s': %s", company_name, e)
-        return []
+        return [], False, False
 
-    return stored
+    return stored, False, False
 
 
 def get_pending_reports(db: Session) -> list[BAReport]:

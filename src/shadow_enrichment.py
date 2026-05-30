@@ -30,8 +30,9 @@ from src.models_shadow import ShadowCompany
 
 logger = logging.getLogger(__name__)
 
-# Nach MAX_RETRIES erfolglosen BA-Versuchen → status='exhausted' (nicht mehr retried)
-MAX_RETRIES = 5
+# Nach MAX_RETRIES CAPTCHA-Blocks → status='exhausted' (nicht mehr retried)
+# Nur relevant bei echtem CAPTCHA — No-Match wird direkt exhausted (kein Retry).
+MAX_RETRIES = 2
 
 # Pfad zur kuratierten GmbH-Liste (generiert via seed_handelsregister.py)
 _SEED_FILE = Path(__file__).parent.parent / "seed_data" / "de_gmbh_curated.txt"
@@ -203,8 +204,11 @@ def enrich_one_shadow(db: Session) -> bool:
     db.commit()
 
     try:
-        # Rückgabewert capturen — [] bei CAPTCHA oder "nicht in BA"
-        reports = fetch_and_store(sc.name, db)
+        # Rückgabewert capturen:
+        # reports          → gespeicherte BAReport-Objekte
+        # captcha_blocked  → CAPTCHA nach max. Retries → Retry sinnvoll
+        # matched_but_empty → BA hat Company gefunden, aber 0 Berichte → direkt exhausted
+        reports, captcha_blocked, matched_but_empty = fetch_and_store(sc.name, db)
 
         # Company-spezifisches Parsing — nicht alle pending Reports global abarbeiten
         from src.models import BAReport as _BAReport
@@ -225,25 +229,40 @@ def enrich_one_shadow(db: Session) -> bool:
             .first()
         )
 
-        # BA-11 CAPTCHA-Propagation:
-        # fetch_and_store gibt [] bei CAPTCHA UND bei "nicht in BA".
-        # Wenn kein Report gefetcht + kein BAFinancial vorhanden → zurück auf pending.
-        # Shadow Company wird beim nächsten 2.5h-Run automatisch retried.
+        # BA-11 Differenzierung:
+        # matched_but_empty → BA kennt die Company, keine Berichte → keine Publikationspflicht erfüllt
+        #                     Kein Retry — direkt exhausted
+        # captcha_blocked   → Infrastruktur-Problem → Retry (bis MAX_RETRIES)
+        # reports leer ohne beides → Name nicht in BA gefunden → direkt exhausted
         if not reports and not fin:
-            sc.retry_count = (sc.retry_count or 0) + 1
-            if sc.retry_count >= MAX_RETRIES:
+            if matched_but_empty:
                 sc.enrichment_status = "exhausted"
                 logger.info(
-                    "enrich_one_shadow: '%s' — exhausted nach %d Versuchen "
-                    "(kein BA-Treffer / CAPTCHA)",
-                    sc.name, sc.retry_count,
+                    "enrich_one_shadow: '%s' — BA-Treffer aber 0 Berichte "
+                    "(keine Publikationspflicht) → direkt exhausted",
+                    sc.name,
                 )
+            elif captcha_blocked:
+                sc.retry_count = (sc.retry_count or 0) + 1
+                if sc.retry_count >= MAX_RETRIES:
+                    sc.enrichment_status = "exhausted"
+                    logger.info(
+                        "enrich_one_shadow: '%s' — CAPTCHA exhausted nach %d Versuchen",
+                        sc.name, sc.retry_count,
+                    )
+                else:
+                    sc.enrichment_status = "pending"
+                    logger.info(
+                        "enrich_one_shadow: '%s' — CAPTCHA → pending "
+                        "(Versuch %d/%d, nächster Run in ~2.5h)",
+                        sc.name, sc.retry_count, MAX_RETRIES,
+                    )
             else:
-                sc.enrichment_status = "pending"
+                # Name nicht in BA gefunden (inkl. Fallbacks) → kein Retry
+                sc.enrichment_status = "exhausted"
                 logger.info(
-                    "enrich_one_shadow: '%s' — kein BA-Treffer → pending "
-                    "(Versuch %d/%d, nächster Run in ~2.5h)",
-                    sc.name, sc.retry_count, MAX_RETRIES,
+                    "enrich_one_shadow: '%s' — nicht in BA gefunden → direkt exhausted",
+                    sc.name,
                 )
             db.commit()
             return False
