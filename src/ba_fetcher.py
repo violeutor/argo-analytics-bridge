@@ -242,16 +242,42 @@ def mark_parsed(
     extraction_confidence: str | None = None,
 ) -> None:
     """
-    Setzt parse_status auf done | error.
+    Setzt parse_status auf done | error und löscht raw_text (Speicher-Cleanup).
     BA-09: extraction_confidence optional mitsetzen:
       'full'         — GuV vollständig (Revenue + EBITDA/EBIT + Net Income)
       'partial'      — Teilfelder fehlen (nur Bilanz oder nur ein GuV-Feld)
       'balance_only' — Nur Bilanz vorhanden (§267 HGB kleine KapGes)
       'not_found'    — Kein strukturiertes Zahlenmaterial extrahierbar
+    raw_text wird nach dem Parse immer genullt — strukturierte Daten stehen
+    in ba_financials/ba_persons, der Rohtext wird nicht mehr gebraucht.
     """
     report = db.query(BAReport).get(report_id)
     if report:
         report.parse_status = status
+        report.raw_text = None  # Speicher freigeben — Daten in ba_financials/ba_persons
         if extraction_confidence is not None:
             report.extraction_confidence = extraction_confidence
         db.commit()
+
+
+def cleanup_parsed_raw_texts(db: Session) -> int:
+    """
+    Einmaliger Cleanup: setzt raw_text=NULL für alle bereits geparsten Reports.
+    Aufrufen nach Deploy um bestehenden Speicher freizugeben.
+    Gibt Anzahl bereinigter Rows zurück.
+    """
+    stale = (
+        db.query(BAReport)
+        .filter(BAReport.parse_status.in_(["done", "error"]))
+        .filter(BAReport.raw_text.isnot(None))
+        .all()
+    )
+    count = len(stale)
+    for r in stale:
+        r.raw_text = None
+    if stale:
+        db.commit()
+        logger.info("cleanup_parsed_raw_texts: %d Reports bereinigt (raw_text → NULL)", count)
+    else:
+        logger.info("cleanup_parsed_raw_texts: keine geparsten Reports mit raw_text gefunden")
+    return count
