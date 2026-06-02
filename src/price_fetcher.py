@@ -15,6 +15,7 @@ Aufruf:
 """
 
 import sys
+import gc
 import time
 import logging
 from datetime import datetime, timezone
@@ -216,6 +217,15 @@ def process_ticker(ticker: str, exchange: str, session,
         benchmark_data=benchmark_data,
         ticker=ticker,
     )
+
+    # MEM-01: DataFrames sofort freigeben — sie werden ab hier nicht mehr gebraucht.
+    # Pro Ticker sind das 2× ~750 Zeilen OHLCV (3J Tagesdaten) + interne Serien aus
+    # compute_beta_metrics. Ohne explizites del bleibt der Peak bis zur nächsten
+    # Iteration bestehen; bei vielen Tickern in einem Prozess (Render Webservice)
+    # akkumuliert das bis zum OOM-Kill → Cron-Abbruch mitten im Lauf.
+    del stock_data
+    del benchmark_data
+
     if metrics is None:
         log.warning(f"[{ticker}] Berechnung fehlgeschlagen — übersprungen.")
         return False
@@ -281,10 +291,18 @@ def run(tickers_override: list[str] | None = None) -> None:
     """
     Haupt-Einstiegspunkt.
     tickers_override: wenn gesetzt, nur diese Ticker verarbeiten (Debug).
+
+    MEM-01: Pro-Ticker-Session-Recycling + GC. Vorher lief EINE Session über alle
+    Ticker — die SQLAlchemy Identity Map wuchs monoton (jedes geladene/hinzugefügte
+    BetaCache-Objekt blieb referenziert), parallel akkumulierten yfinance-DataFrames.
+    Bei wachsender Seed-Liste → OOM-Kill auf Render → Cron-Abbruch mitten im Lauf
+    (Companies nach dem Crash bekommen kein Beta → 404). Jetzt: frische Session +
+    expunge_all + gc.collect() nach jedem Ticker → flacher, konstanter Speicher.
     """
     log.info("=== YH price_fetcher · Start ===")
-    session = SessionLocal()
 
+    # Ticker-Liste mit kurzlebiger Session laden, dann schließen
+    _load_session = SessionLocal()
     try:
         if tickers_override:
             all_tickers = fetch_tickers_from_argo()
@@ -295,15 +313,21 @@ def run(tickers_override: list[str] | None = None) -> None:
             ]
         else:
             targets = fetch_tickers_from_argo()
+    finally:
+        _load_session.close()
 
-        if not targets:
-            log.warning("Keine Ticker zu verarbeiten.")
-            return
+    if not targets:
+        log.warning("Keine Ticker zu verarbeiten.")
+        return
 
-        success = 0
-        failed  = 0
+    success = 0
+    failed  = 0
 
-        for entry in targets:
+    for entry in targets:
+        # MEM-01: frische Session pro Ticker — verhindert monotones Wachstum der
+        # Identity Map über den gesamten Lauf.
+        session = SessionLocal()
+        try:
             ok = process_ticker(
                 ticker=entry["ticker"],
                 exchange=entry["exchange"],
@@ -311,19 +335,24 @@ def run(tickers_override: list[str] | None = None) -> None:
                 ticker_yf=entry.get("ticker_yf", ""),
                 company_id=entry.get("company_id", ""),
             )
-            if ok:
-                success += 1
-            else:
-                failed += 1
-            time.sleep(RATE_LIMIT_SEC)
+        except Exception as e:
+            log.error(f"[{entry['ticker']}] unerwarteter Fehler: {e}")
+            ok = False
+        finally:
+            session.expunge_all()   # Identity Map leeren
+            session.close()
+            gc.collect()            # yfinance-DataFrames + Serien einsammeln
 
-        log.info(
-            f"=== YH price_fetcher · Fertig · "
-            f"{success} OK · {failed} fehlgeschlagen ==="
-        )
+        if ok:
+            success += 1
+        else:
+            failed += 1
+        time.sleep(RATE_LIMIT_SEC)
 
-    finally:
-        session.close()
+    log.info(
+        f"=== YH price_fetcher · Fertig · "
+        f"{success} OK · {failed} fehlgeschlagen ==="
+    )
 
 
 # ---------------------------------------------------------------------------
