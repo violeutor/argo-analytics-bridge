@@ -27,6 +27,8 @@ Entfernt (Session 22):
 import logging
 from datetime import timezone
 
+import yfinance as yf
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
