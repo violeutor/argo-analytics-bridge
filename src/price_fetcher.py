@@ -170,23 +170,28 @@ def process_ticker(ticker: str, exchange: str, session,
                    ticker_yf: str = "", company_id: str = "") -> bool:
     """
     Verarbeitet einen einzelnen Ticker:
-    1. yfinance-Ticker bestimmen (ticker_yf aus DB oder Suffix-Logik)
-    2. Benchmark bestimmen
+    1. yfinance-Ticker bestimmen (ticker_yf bevorzugt — fertig vom Backend/Argo-Cron)
+    2. Benchmark bestimmen (via exchange)
     3. Stock + Benchmark Kursdaten holen
     4. Beta + Volatilität berechnen (via beta_calculator)
-    5. beta_cache upsert
-    6. ticker_yf in Argo-DB zurückschreiben (companies.ticker_yf)
+    5. beta_cache upsert — KEY = yf_ticker (z.B. "BAYN.DE"), nicht Rohticker
+
+    Speicher-Key-Konsistenz (BETA-REVIEW-01):
+      beta_cache.ticker speichert den yf-Ticker (mit Suffix), weil das Backend
+      exakt damit abfragt (GET /yahoo/ticker/BAYN.DE). Vorher wurde unter dem
+      Rohticker "BAYN" gespeichert → struktureller 404 für jeden Nicht-US-Ticker.
 
     Gibt True zurück bei Erfolg.
     """
     benchmark_ticker, is_fallback = resolve_benchmark(exchange)
 
-    # yfinance-Ticker: ticker_yf aus DB bevorzugen (von Argo-Cron vorberechnet)
-    # Bridge schreibt ticker_yf nicht mehr zurück — das macht Argo-Backend-Cron (BUG-42)
-    if ticker_yf and ticker_yf != ticker:
+    # yfinance-Ticker bestimmen:
+    #   1. ticker_yf gesetzt → as-is verwenden (Ad-hoc vom Backend ODER Argo-Cron
+    #      vorberechnet). Backend kennt die OpenFIGI-Identität, Bridge leitet NICHTS ab.
+    #   2. sonst → lokale Suffix-Ableitung (Bulk-Cron-Fallback, falls ticker_yf leer)
+    if ticker_yf:
         yf_ticker = ticker_yf
     else:
-        # Fallback: Suffix-Logik lokal (für den Fall dass Argo-Cron noch nicht gelaufen)
         exchange_norm = exchange.lower() if exchange else ""
         suffix = TICKER_SUFFIX_MAP.get(exchange_norm, "")
         yf_ticker = ticker + suffix if suffix and "." not in ticker else ticker
@@ -239,9 +244,9 @@ def process_ticker(ticker: str, exchange: str, session,
             f"[{ticker}] Nur {trading_days_1y} Handelstage (1Y) — data_quality=partial."
         )
 
-    # beta_cache upsert
+    # beta_cache upsert — KEY = yf_ticker (Speicher-Key-Konsistenz BETA-REVIEW-01)
     try:
-        existing = session.query(BetaCache).filter_by(ticker=ticker).first()
+        existing = session.query(BetaCache).filter_by(ticker=yf_ticker).first()
 
         if existing:
             existing.exchange              = exchange
@@ -257,7 +262,7 @@ def process_ticker(ticker: str, exchange: str, session,
             existing.source                = "yfinance"
         else:
             entry = BetaCache(
-                ticker                = ticker,
+                ticker                = yf_ticker,
                 exchange              = exchange,
                 beta_1y               = metrics["beta_1y"],
                 beta_3y               = metrics.get("beta_3y"),
@@ -274,7 +279,7 @@ def process_ticker(ticker: str, exchange: str, session,
 
         session.commit()
         log.info(
-            f"[{ticker}] ✓  beta_1y={metrics['beta_1y']:.3f} "
+            f"[{ticker}→{yf_ticker}] ✓  beta_1y={metrics['beta_1y']:.3f} "
             f"beta_3y={metrics.get('beta_3y', '—')} "
             f"vol_30d={metrics['volatility_30d']:.3f} "
             f"quality={data_quality}"
@@ -285,6 +290,48 @@ def process_ticker(ticker: str, exchange: str, session,
         session.rollback()
         log.error(f"[{ticker}] DB-Fehler beim Upsert: {e}")
         return False
+
+
+def enrich_one_adhoc(yf_ticker: str, exchange: str = "", raw_ticker: str = "") -> bool:
+    """
+    Ad-hoc-Enrichment für GENAU EINEN Ticker (BETA-REVIEW-01).
+
+    Wird vom Bridge-Endpoint POST /yahoo/ticker/enrich als BackgroundTask
+    aufgerufen, sobald das Argo-Backend einen frisch aufgelösten listed Ticker
+    pusht (Cold-Load, beta_cache noch leer). Entkoppelt den teuren yfinance-Pfad
+    (~5-6s) vollständig vom Backend-Request — das Backend feuert und vergisst,
+    das Frontend pollt GET /yahoo/ticker/{yf_ticker}.
+
+    Args:
+      yf_ticker  — FERTIGER yfinance-Ticker vom Backend (z.B. "BAYN.DE").
+                   Die Bridge leitet NICHTS ab — Backend kennt die Identität
+                   (OpenFIGI), Bridge nimmt den String as-is als Speicher-Key.
+      exchange   — Exchange-Display-Name (z.B. "Frankfurt") — nur für Benchmark-
+                   Auswahl (^GDAXI vs ^GSPC). Optional.
+      raw_ticker — Rohticker ohne Suffix (z.B. "BAYN") — nur fürs Logging.
+
+    Eigene kurzlebige Session + GC (MEM-01-konform). Returns True bei Erfolg.
+    """
+    log.info(
+        "=== Ad-hoc Beta-Enrich · yf_ticker=%s exchange=%s ===",
+        yf_ticker, exchange or "?",
+    )
+    session = SessionLocal()
+    try:
+        ok = process_ticker(
+            ticker=raw_ticker or yf_ticker,
+            exchange=exchange,
+            session=session,
+            ticker_yf=yf_ticker,   # erzwingt yf_ticker als Speicher-Key
+        )
+        return ok
+    except Exception as e:
+        log.error("enrich_one_adhoc '%s' unerwarteter Fehler: %s", yf_ticker, e)
+        return False
+    finally:
+        session.expunge_all()
+        session.close()
+        gc.collect()
 
 
 def run(tickers_override: list[str] | None = None) -> None:

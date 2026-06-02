@@ -29,7 +29,8 @@ from datetime import timezone
 
 import yfinance as yf
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from src.database import get_db
@@ -38,6 +39,24 @@ from src.models import BetaCache, DamodaranBeta
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/yahoo", tags=["yahoo"])
+
+# In-Flight-Guard (BETA-REVIEW-01): verhindert dass mehrere Cold-Loads denselben
+# yfinance-Download parallel starten. Prozess-weites Set — analog zum _fetching-Set
+# der alten company.py (BA). Kein Lock nötig: GIL macht set.add/discard atomar genug
+# für diesen Zweck (Doppel-Trigger-Schutz, kein harter Mutex-Bedarf).
+_enriching: set[str] = set()
+
+
+class BetaEnrichRequest(BaseModel):
+    """
+    Payload für POST /yahoo/ticker/enrich.
+
+    Das Backend schickt den FERTIG aufgelösten yf-Ticker — die Bridge leitet
+    nichts ab (kein OpenFIGI-Wissen in der Bridge). exchange nur für Benchmark.
+    """
+    yf_ticker:  str            # z.B. "BAYN.DE" — Speicher-Key, as-is verwendet
+    exchange:   str = ""       # z.B. "Frankfurt" — nur für Benchmark-Auswahl
+    raw_ticker: str = ""       # z.B. "BAYN" — nur fürs Logging
 
 
 # ---------------------------------------------------------------------------
@@ -76,6 +95,56 @@ def _damodaran_to_dict(entry: DamodaranBeta) -> dict:
         "updated_year":    entry.updated_year,
         "source_url":      entry.source_url,
     }
+
+
+# ---------------------------------------------------------------------------
+# POST /yahoo/ticker/enrich
+# Ad-hoc Beta-Enrichment (BETA-REVIEW-01)
+# WICHTIG: muss VOR GET /ticker/{ticker} stehen — sonst fängt der Pfad-Parameter
+#          {ticker} das Wort "enrich" ab (FastAPI matcht in Definitionsreihenfolge).
+# ---------------------------------------------------------------------------
+
+@router.post("/ticker/enrich", status_code=202)
+def trigger_beta_enrich(
+    payload: BetaEnrichRequest,
+    background_tasks: BackgroundTasks,
+):
+    """
+    Ad-hoc Beta-Enrichment für einen frisch aufgelösten Ticker.
+
+    Wird vom Argo-Backend beim Cold-Load eines listed Company aufgerufen, sobald
+    der Ticker via OpenFIGI feststeht und beta_cache noch leer ist. Startet den
+    teuren yfinance-Pfad (~5-6s) als BackgroundTask in der Bridge → Backend wird
+    NICHT blockiert (Fire-and-Forget). Frontend pollt GET /yahoo/ticker/{yf_ticker}.
+
+    Returns 202 Accepted sofort. In-Flight-Guard verhindert Doppel-Downloads bei
+    parallelen Cold-Loads desselben Tickers.
+    """
+    yf_ticker = payload.yf_ticker.strip().upper()
+    if not yf_ticker:
+        raise HTTPException(status_code=422, detail="yf_ticker darf nicht leer sein.")
+
+    if yf_ticker in _enriching:
+        log.info("[POST /yahoo/ticker/enrich] '%s' bereits in-flight — 202 ohne neuen Task", yf_ticker)
+        return {"status": "already_running", "yf_ticker": yf_ticker}
+
+    def _run_enrich():
+        from src.price_fetcher import enrich_one_adhoc
+        try:
+            enrich_one_adhoc(
+                yf_ticker=yf_ticker,
+                exchange=payload.exchange,
+                raw_ticker=payload.raw_ticker,
+            )
+        except Exception as e:
+            log.error("[enrich BG] '%s' failed: %s", yf_ticker, e)
+        finally:
+            _enriching.discard(yf_ticker)
+
+    _enriching.add(yf_ticker)
+    background_tasks.add_task(_run_enrich)
+    log.info("[POST /yahoo/ticker/enrich] '%s' getriggert (exchange=%s)", yf_ticker, payload.exchange or "?")
+    return {"status": "triggered", "yf_ticker": yf_ticker}
 
 
 # ---------------------------------------------------------------------------
