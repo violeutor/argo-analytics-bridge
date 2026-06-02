@@ -2,13 +2,18 @@
 BA-Bridge — Main
 =================
 Eigenständiger FastAPI-Service.
-Stellt Bundesanzeiger-Daten als strukturiertes JSON bereit.
+Beta-Kennzahlen für börsennotierte Companies (Yahoo Finance).
 
 Endpoints:
-  GET /health
-  GET /ba/company/{name}
+  GET  /health
+  GET  /yahoo/beta/{ticker}
+  POST /yahoo/beta/bulk
 
-Cron: täglich 03:00 UTC — fetch_and_store + parse_pending für alle Companies
+Cron: täglich 22:00 UTC — Beta-Update für alle is_listed Ticker aus Supabase.
+
+BA-Teil (Bundesanzeiger) entfernt — S47.
+Bundesanzeiger seit 2022 strukturell leer (Daten im Unternehmensregister).
+Shadow-Queue + BA-Scraper + Shadow-Routes ebenfalls entfernt.
 """
 import logging
 from contextlib import asynccontextmanager
@@ -20,9 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.config import settings
 from src.database import init_db, SessionLocal
-from src.routes.company import router as company_router
 from src.routes.yahoo import router as yahoo_router
-from src.routes.shadow import router as shadow_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -32,94 +35,6 @@ logger = logging.getLogger(__name__)
 
 
 # ── Cron Job ──────────────────────────────────────────────────────────────────
-
-def _cron_enrich_all() -> None:
-    """
-    Täglicher Cron 03:00 UTC: alle Companies in ba_reports refreshen + pending parsen.
-    Holt distinct company_names aus ba_reports → re-fetch → parse_pending.
-
-    KPI-04: parse_pending() gibt (count, companies) zurück — nur frisch geparste
-    Companies werden an Argo kpi_timeseries gepusht (nicht alle). Das spart
-    unnötige HTTP-Calls und verhindert Argo-Überlastung beim Cron.
-    """
-    from src.ba_fetcher import fetch_and_store
-    from src.ba_parser import parse_pending, push_kpi_to_argo
-
-    db = SessionLocal()
-    try:
-        from src.models import BAReport
-        from sqlalchemy import distinct
-
-        names = [
-            row[0]
-            for row in db.query(distinct(BAReport.company_name)).all()
-        ]
-        logger.info("Cron: %d Companies zu refreshen", len(names))
-
-        for name in names:
-            try:
-                fetch_and_store(name, db)
-            except Exception as e:
-                logger.warning("Cron fetch failed für '%s': %s", name, e)
-
-        # KPI-04: parse_pending gibt (count, parsed_company_names) zurück
-        parsed_count, parsed_companies = parse_pending(db, limit=100)
-        logger.info(
-            "Cron parse_pending: %d Reports geparst, %d Companies neu",
-            parsed_count, len(parsed_companies),
-        )
-
-        # KPI-Push nur für frisch geparste Companies — nicht für alle names
-        total_pushed = 0
-        for name in parsed_companies:
-            try:
-                total_pushed += push_kpi_to_argo(name, db)
-            except Exception as e:
-                logger.warning("KPI-Push failed für '%s': %s", name, e)
-        if parsed_companies:
-            logger.info(
-                "Cron KPI-Push: %d Rows für %d Companies in Argo Supabase geschrieben",
-                total_pushed, len(parsed_companies),
-            )
-
-    except Exception as e:
-        logger.error("Cron _cron_enrich_all failed: %s", e)
-    finally:
-        db.close()
-
-
-def _cron_shadow_seed() -> None:
-    """
-    Täglich 03:30 UTC: neue DE Companies aus Wikipedia-Kategorie 'Unternehmen_(Deutschland)'
-    in Shadow-Queue aufnehmen. Filtert bereits in Supabase vorhandene Companies.
-    Prio-Score via Wikipedia DE Pageviews.
-    """
-    from src.shadow_enrichment import seed_shadow_queue
-    db = SessionLocal()
-    try:
-        added = seed_shadow_queue(db)
-        logger.info("Cron _cron_shadow_seed: %d neue Companies in Queue", added)
-    except Exception as e:
-        logger.error("Cron _cron_shadow_seed failed: %s", e)
-    finally:
-        db.close()
-
-
-def _cron_shadow_enrich() -> None:
-    """
-    Alle 2.5h: 1 pending Shadow-Company anreichern.
-    ≈10 Companies/Tag — sequentiell, kein CAPTCHA-Risiko.
-    """
-    from src.shadow_enrichment import enrich_one_shadow
-    db = SessionLocal()
-    try:
-        enrich_one_shadow(db)
-    except Exception as e:
-        logger.error("Cron _cron_shadow_enrich failed: %s", e)
-    finally:
-        db.close()
-
-
 
 def _cron_beta_update() -> None:
     """
@@ -147,59 +62,7 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("BA-Bridge starting up …")
     init_db()
-    # Shadow-DB Tabelle anlegen falls nicht vorhanden
-    from src.models_shadow import ShadowCompany  # noqa: F401 — triggers table creation
-    from src.database import engine, Base
-    Base.metadata.create_all(bind=engine, tables=[ShadowCompany.__table__])
-    logger.info("Shadow-DB initialisiert")
 
-    # ── Migration: retry_count Spalte (idempotent, läuft intern — kein externer DB-Zugriff) ──
-    try:
-        from sqlalchemy import text
-        with engine.connect() as _conn:
-            _conn.execute(text(
-                "ALTER TABLE shadow_companies "
-                "ADD COLUMN IF NOT EXISTS retry_count INTEGER DEFAULT 0"
-            ))
-            _conn.commit()
-        logger.info("Shadow-DB: retry_count Spalte sichergestellt")
-    except Exception as _e:
-        logger.warning("Shadow-DB retry_count Migration fehlgeschlagen: %s", _e)
-
-    # ── Startup Cleanup: stale 'running' → 'pending' ─────────────────────────
-    try:
-        from src.shadow_enrichment import reset_stale_running
-        _db_startup = SessionLocal()
-        try:
-            reset_stale_running(_db_startup)
-        finally:
-            _db_startup.close()
-    except Exception as _e:
-        logger.warning("Startup reset_stale_running fehlgeschlagen: %s", _e)
-
-    # ── Startup Cleanup: raw_text für geparste Reports nullen ─────────────────
-    # Gibt Speicher auf Render Postgres Basic frei — läuft bei jedem Deploy,
-    # ist idempotent (findet nach erstem Lauf nichts mehr).
-    try:
-        from src.ba_fetcher import cleanup_parsed_raw_texts
-        _db_cleanup = SessionLocal()
-        try:
-            _cleaned = cleanup_parsed_raw_texts(_db_cleanup)
-            if _cleaned:
-                logger.info("Startup raw_text Cleanup: %d Reports bereinigt", _cleaned)
-        finally:
-            _db_cleanup.close()
-    except Exception as _e:
-        logger.warning("Startup raw_text Cleanup fehlgeschlagen: %s", _e)
-
-    scheduler.add_job(
-        _cron_enrich_all,
-        trigger="cron",
-        hour=settings.cron_hour,
-        minute=settings.cron_minute,
-        id="daily_enrich",
-        replace_existing=True,
-    )
     scheduler.add_job(
         _cron_beta_update,
         trigger="cron",
@@ -208,56 +71,9 @@ async def lifespan(app: FastAPI):
         id="daily_beta_update",
         replace_existing=True,
     )
-    scheduler.add_job(
-        _cron_shadow_seed,
-        trigger="cron",
-        hour=3,
-        minute=30,
-        id="daily_shadow_seed",
-        replace_existing=True,
-    )
-    scheduler.add_job(
-        _cron_shadow_enrich,
-        trigger="interval",
-        minutes=150,            # alle 2.5h → ≈10 Companies/Tag
-        id="shadow_enrich",
-        replace_existing=True,
-    )
     scheduler.start()
 
-    # ── Startup-Hook: Shadow-Queue sofort seeden wenn leer ───────────────────
-    # Verhindert 24h Wartezeit nach Redeployment (Crons laufen zu festen UTC-Zeiten)
-    try:
-        from src.models_shadow import ShadowCompany
-        db_check = SessionLocal()
-        try:
-            queue_size = db_check.query(ShadowCompany).count()
-        finally:
-            db_check.close()
-
-        if queue_size < 10:
-            logger.info(
-                "Shadow-Queue zu klein nach Startup (%d Companies) — "
-                "_cron_shadow_seed wird sofort gefeuert",
-                queue_size,
-            )
-            scheduler.add_job(
-                _cron_shadow_seed,
-                trigger="date",
-                run_date=datetime.now(timezone.utc),
-                id="startup_shadow_seed",
-                replace_existing=True,
-            )
-        else:
-            logger.info("Shadow-Queue bei Startup: %d Companies vorhanden", queue_size)
-    except Exception as e:
-        logger.warning("Startup Shadow-Seed-Check fehlgeschlagen: %s", e)
-
-    logger.info(
-        "Crons gestartet: BA-Enrich %02d:%02d UTC · "
-        "Shadow-Seed 03:30 UTC · Beta-Update 22:00 UTC",
-        settings.cron_hour, settings.cron_minute,
-    )
+    logger.info("Cron gestartet: Beta-Update 22:00 UTC")
 
     yield
 
@@ -270,8 +86,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="BA-Bridge",
-    description="Bundesanzeiger → strukturiertes JSON für Argo Analytics",
-    version="1.0.0",
+    description="Beta-Kennzahlen via Yahoo Finance für Argo Analytics",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
@@ -282,9 +98,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(company_router)
 app.include_router(yahoo_router)
-app.include_router(shadow_router)
 
 
 @app.get("/health")
@@ -292,47 +106,15 @@ def health():
     return {"status": "ok", "service": "ba-bridge"}
 
 
-# ── Manuelle Trigger (Debugging / Testing) ────────────────────────────────────
+# ── Manueller Trigger (Debugging / Testing) ───────────────────────────────────
 
-@app.post("/shadow/seed/trigger")
-async def trigger_shadow_seed(background_tasks: BackgroundTasks):
+@app.post("/admin/beta/trigger")
+async def trigger_beta_update(background_tasks: BackgroundTasks):
     """
-    Manueller Trigger für _cron_shadow_seed.
-    Sofortiges Seeden der Shadow-Queue ohne auf 03:30 UTC zu warten.
+    Manueller Trigger für _cron_beta_update.
+    Beta-Kennzahlen sofort neu berechnen ohne auf 22:00 UTC zu warten.
     """
-    background_tasks.add_task(_cron_shadow_seed)
-    return {"status": "triggered", "job": "_cron_shadow_seed"}
-
-
-@app.post("/shadow/enrich/trigger")
-async def trigger_shadow_enrich(background_tasks: BackgroundTasks):
-    """
-    Manueller Trigger für _cron_shadow_enrich.
-    Enriched 1 pending Shadow-Company sofort.
-    """
-    background_tasks.add_task(_cron_shadow_enrich)
-    return {"status": "triggered", "job": "_cron_shadow_enrich"}
-
-
-@app.post("/admin/cleanup/raw-texts")
-async def trigger_raw_text_cleanup(background_tasks: BackgroundTasks):
-    """
-    Einmaliger Sofort-Cleanup: raw_text=NULL für alle geparsten Reports.
-    Gibt Speicher auf Render Postgres Basic frei.
-    Idempotent — sicher mehrfach aufrufbar.
-    """
-    def _run_cleanup():
-        from src.ba_fetcher import cleanup_parsed_raw_texts
-        db = SessionLocal()
-        try:
-            count = cleanup_parsed_raw_texts(db)
-            logger.info("/admin/cleanup/raw-texts: %d Reports bereinigt", count)
-        except Exception as e:
-            logger.error("/admin/cleanup/raw-texts failed: %s", e)
-        finally:
-            db.close()
-
-    background_tasks.add_task(_run_cleanup)
-    return {"status": "triggered", "job": "cleanup_parsed_raw_texts"}
+    background_tasks.add_task(_cron_beta_update)
+    return {"status": "triggered", "job": "_cron_beta_update"}
 
 

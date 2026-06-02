@@ -18,13 +18,6 @@ class Settings(BaseSettings):
     argo_backend_url: str = ""          # z.B. https://argo-analytics-backend.onrender.com
     argo_api_key: str = ""              # X-API-Key des Argo-Backends (gleicher Key wie Frontend nutzt)
 
-    # Rate-Limit Bundesanzeiger (Sekunden zwischen Requests)
-    ba_rate_limit_sec: float = 3.0
-
-    # Cron-Schedule (APScheduler cron-Syntax)
-    cron_hour: int = 3      # 03:00 UTC täglich
-    cron_minute: int = 0
-
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
