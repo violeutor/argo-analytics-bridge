@@ -25,6 +25,7 @@ Entfernt (Session 22):
 """
 
 import logging
+import time
 from datetime import timezone
 
 import yfinance as yf
@@ -45,6 +46,17 @@ router = APIRouter(prefix="/yahoo", tags=["yahoo"])
 # der alten company.py (BA). Kein Lock nötig: GIL macht set.add/discard atomar genug
 # für diesen Zweck (Doppel-Trigger-Schutz, kein harter Mutex-Bedarf).
 _enriching: set[str] = set()
+
+# Cooldown-Map (BETA-REVIEW-01 Folge): yf_ticker → letzter Enrich-Versuch (monotonic).
+# WARUM ZUSÄTZLICH zum In-Flight-Set: _enriching wird im finally von _run_enrich sofort
+# wieder freigegeben, sobald der ~5s-yfinance-Versuch durch ist. Bei yfinance-Rate-Limit
+# scheitert der Versuch in <5s und gibt den Ticker frei → der nächste Frontend-Poll (~6s
+# Takt, aber mehrere /company-Loads dazwischen) triggert sofort neu → Retry-Sturm, der
+# das Rate-Limit weiter anheizt (beobachtet: 7 Pushes/47s für BAYN.DE). Der Cooldown
+# blockt erneute Versuche desselben Tickers für _ENRICH_COOLDOWN_SEC NACH Abschluss —
+# unabhängig von Erfolg/Fehler. yfinance bekommt Luft sich zu erholen.
+_enrich_cooldown: dict[str, float] = {}
+_ENRICH_COOLDOWN_SEC = 90.0
 
 
 class BetaEnrichRequest(BaseModel):
@@ -128,6 +140,17 @@ def trigger_beta_enrich(
         log.info("[POST /yahoo/ticker/enrich] '%s' bereits in-flight — 202 ohne neuen Task", yf_ticker)
         return {"status": "already_running", "yf_ticker": yf_ticker}
 
+    # Cooldown-Check: kürzlich versucht? → kein neuer yfinance-Call (Sturm-Schutz).
+    _last = _enrich_cooldown.get(yf_ticker)
+    if _last is not None:
+        _elapsed = time.monotonic() - _last
+        if _elapsed < _ENRICH_COOLDOWN_SEC:
+            log.info(
+                "[POST /yahoo/ticker/enrich] '%s' im Cooldown (%.0fs/%.0fs) — 202 ohne neuen Task",
+                yf_ticker, _elapsed, _ENRICH_COOLDOWN_SEC,
+            )
+            return {"status": "cooldown", "yf_ticker": yf_ticker, "retry_after_sec": round(_ENRICH_COOLDOWN_SEC - _elapsed)}
+
     def _run_enrich():
         from src.price_fetcher import enrich_one_adhoc
         try:
@@ -139,6 +162,9 @@ def trigger_beta_enrich(
         except Exception as e:
             log.error("[enrich BG] '%s' failed: %s", yf_ticker, e)
         finally:
+            # Cooldown-Stempel NACH Abschluss setzen (Erfolg ODER Fehler) — erst ab
+            # jetzt zählt das Fenster, in dem kein erneuter Versuch erlaubt ist.
+            _enrich_cooldown[yf_ticker] = time.monotonic()
             _enriching.discard(yf_ticker)
 
     _enriching.add(yf_ticker)
